@@ -5,6 +5,7 @@ Loss functions
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from utils.metrics import bbox_iou
 from utils.torch_utils import de_parallel
@@ -98,6 +99,21 @@ def imitation_loss(teacher, student, mask):
     return diff
 
 
+
+def feature_mse(feature_map1, feature_map2):
+        loss=0
+        if(feature_map1 is not None and feature_map2 is not None):
+            # loss = F.binary_cross_entropy_with_logits(F.sigmoid(feature_map1), F.sigmoid(feature_map2))
+            loss = F.mse_loss(feature_map1, feature_map2)
+        return loss
+
+def feature_cross_entropy(feature_map1, feature_map2):
+        loss=0
+        if(feature_map1 is not None and feature_map2 is not None):
+            # loss = F.binary_cross_entropy_with_logits(F.sigmoid(feature_map1), F.sigmoid(feature_map2))
+            loss = F.binary_cross_entropy_with_logits(feature_map1, feature_map2)
+        return loss
+
 class ComputeLoss:
     sort_obj_iou = False
 
@@ -127,14 +143,40 @@ class ComputeLoss:
         self.nl = m.nl  # number of layers
         self.anchors = m.anchors
         self.device = device
-
-    def __call__(self, p, targets, teacher=None, student=None, mask=None):  # predictions, targets, model
+        
+    def xywh_to_xyxy(self,boxes, image_size=640):
+        """
+        Convert bounding boxes from (x, y, w, h) format to (x1, y1, x2, y2) format.
+        
+        Args:
+            boxes (torch.Tensor): Tensor of shape (N, 4) containing bounding boxes in (x, y, w, h) format.
+            image_size (tuple): Tuple containing the width and height of the image.
+            
+        Returns:
+            torch.Tensor: Tensor of shape (N, 4) containing bounding boxes in (x1, y1, x2, y2) format.
+        """
+        width, height = image_size,image_size
+        x1 = boxes[:, 0] - boxes[:, 2] / 2
+        y1 = boxes[:, 1] - boxes[:, 3] / 2
+        x2 = boxes[:, 0] + boxes[:, 2] / 2
+        y2 = boxes[:, 1] + boxes[:, 3] / 2
+        
+        # Clamp values to be within image boundaries
+        x1 = torch.clamp(x1, 0, width)
+        y1 = torch.clamp(y1, 0, height)
+        x2 = torch.clamp(x2, 0, width)
+        y2 = torch.clamp(y2, 0, height)
+    
+        return torch.stack((x1, y1, x2, y2), dim=1)
+        
+    # def get_gt_bbox(self,p,targets):
+    #     _, tboxs, __, ___ = self.build_targets(p, targets) ## tcls, tboxs, indices, anchors
+    #     return self.xywh_to_xyxy(boxes=tboxs)
+    
+    def get_lcls_lbox_lobj(self,p,tcls, tbox, indices, anchors):
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
         lobj = torch.zeros(1, device=self.device)  # object loss
-        tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
-
-        # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
             tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
@@ -180,11 +222,87 @@ class ComputeLoss:
         lbox *= self.hyp['box']
         lobj *= self.hyp['obj']
         lcls *= self.hyp['cls']
-        bs = tobj.shape[0]  # batch size
+        
+        return lbox,lobj,lcls
+            
+    def __call__(self,p,targets,student=None, teacher=None, student_inv=None,teacher_inv=None):  # predictions, targets, model
+        
+        tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+        
+        ## teachers predictions
+        
+        # print(f"teacher targets ===> {tcls}")
+        lbox,lobj,lcls=self.get_lcls_lbox_lobj(p,tcls, tbox, indices, anchors)
+        
+        distillation_factor=0.9
+        foward_factor,backward_factor=0.8,0.5        
+        # roi_loss=feature_cross_entropy(teacher,student)
+        # roi_inv_loss=feature_cross_entropy(student_inv,teacher_inv)
+        roi_loss=feature_mse(student,teacher)
+        roi_inv_loss=feature_mse(student_inv,teacher_inv)
+        total_loss=foward_factor*roi_loss+backward_factor*roi_inv_loss
+        total_loss=total_loss+lbox+lobj+lcls
+        
+        return (total_loss) * distillation_factor, torch.cat((lbox, lobj, lcls)).detach()
 
-        lmask = imitation_loss(teacher, student, mask) * 0.01
+    # def __call__(self, p, targets, teacher=None, student=None, mask=None):  # predictions, targets, model
+    #     lcls = torch.zeros(1, device=self.device)  # class loss
+    #     lbox = torch.zeros(1, device=self.device)  # box loss
+    #     lobj = torch.zeros(1, device=self.device)  # object loss
+    #     tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+    #     # print(f"called_targets ===> {tbox}")
+    #     # print(f"called_anchors ===> {anchors}")
+    #     # Losses
+    #     for i, pi in enumerate(p):  # layer index, layer predictions
+    #         b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
+    #         tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
 
-        return (lbox + lobj + lcls + lmask) * bs, torch.cat((lbox, lobj, lcls)).detach()
+    #         n = b.shape[0]  # number of targets
+    #         if n:
+    #             # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
+    #             pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
+
+    #             # Regression
+    #             pxy = pxy.sigmoid() * 2 - 0.5
+    #             pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
+    #             pbox = torch.cat((pxy, pwh), 1)  # predicted box
+    #             iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
+    #             lbox += (1.0 - iou).mean()  # iou loss
+
+    #             # Objectness
+    #             iou = iou.detach().clamp(0).type(tobj.dtype)
+    #             if self.sort_obj_iou:
+    #                 j = iou.argsort()
+    #                 b, a, gj, gi, iou = b[j], a[j], gj[j], gi[j], iou[j]
+    #             if self.gr < 1:
+    #                 iou = (1.0 - self.gr) + self.gr * iou
+    #             tobj[b, a, gj, gi] = iou  # iou ratio
+
+    #             # Classification
+    #             if self.nc > 1:  # cls loss (only if multiple classes)
+    #                 t = torch.full_like(pcls, self.cn, device=self.device)  # targets
+    #                 t[range(n), tcls[i]] = self.cp
+    #                 lcls += self.BCEcls(pcls, t)  # BCE
+
+    #             # Append targets to text file
+    #             # with open('targets.txt', 'a') as file:
+    #             #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
+
+    #         obji = self.BCEobj(pi[..., 4], tobj)
+    #         lobj += obji * self.balance[i]  # obj loss
+    #         if self.autobalance:
+    #             self.balance[i] = self.balance[i] * 0.9999 + 0.0001 / obji.detach().item()
+
+    #     if self.autobalance:
+    #         self.balance = [x / self.balance[self.ssi] for x in self.balance]
+    #     lbox *= self.hyp['box']
+    #     lobj *= self.hyp['obj']
+    #     lcls *= self.hyp['cls']
+    #     bs = tobj.shape[0]  # batch size
+
+    #     lmask = imitation_loss(teacher, student, mask) * 0.01
+
+    #     return (lbox + lobj + lcls + lmask) * bs, torch.cat((lbox, lobj, lcls)).detach()
 
     def build_targets(self, p, targets):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
