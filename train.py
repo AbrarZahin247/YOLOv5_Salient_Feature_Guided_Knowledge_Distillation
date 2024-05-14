@@ -61,6 +61,10 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
 from utils.loss import ComputeLoss
+# from utils.computeloss import ComputeLoss as TeacherComputeLoss
+from utils.get_teacher_loss import get_model_performance
+
+
 from utils.metrics import fitness
 from utils.plots import plot_evolve
 from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, select_device, smart_DDP, smart_optimizer,
@@ -106,14 +110,25 @@ def xywh_2_xyxy(xywh,image_width,image_height):
     y2 = int(min(image_height - 1, y_abs + h_abs / 2))    
     return x1,y1,x2,y2
 
-def create_bbox_mask(xywh,mask, image_width, image_height):
-    x1,y1,x2,y2=xywh_2_xyxy(xywh,image_width, image_height)
+# def create_bbox_mask(xywh,mask, image_width, image_height):
+#     x1,y1,x2,y2=xywh_2_xyxy(xywh,image_width, image_height)
 
-    # Create mask
-    # mask = torch.zeros(image_height, image_width)
-    mask[y1:y2+1, x1:x2+1] = 1
+#     # Create mask
+#     # mask = torch.zeros(image_height, image_width)
+#     mask[y1:y2+1, x1:x2+1] = 1
+#     return mask
+
+def create_bbox_mask(xywh, mask, image_width, image_height):
+    x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
+    # Check if both starting point coordinates are within mask boundaries
+    if 0 <= x1 < image_width and 0 <= y1 < image_height:
+        # Check if ending point coordinates are within mask boundaries
+        x2 = min(image_width - 1, x2)
+        y2 = min(image_height - 1, y2)
+        # Create mask
+        mask[y1:y2+1, x1:x2+1] = 1
     return mask
-    ## return torch.cat((mask.unsqueeze(0),) * 3, dim=0)
+
 
 def masked_img_and_inv_masked_img(targets,imgs):
     with torch.no_grad():
@@ -130,59 +145,181 @@ def masked_img_and_inv_masked_img(targets,imgs):
         for target in targets:
             xywh=target[-4:]        
             image_index_batch=int(target[0])
-            print(f"img idx target {image_index_batch}-----{target[1]}")
+            # print(f"img idx target {image_index_batch}-----{target[1]}")
             if(image_index_batch<batch):
                 # print(f"curr index {curr_batch_index} ** image index {image_index_batch}")
                 if(image_index_batch in image_index_batch_list):
                     ## key exists
                     mask=create_bbox_mask(xywh,mask,w,h)
-                    batched_targets[image_index_batch].append({int(target[1]):xywh_2_xyxy(xywh,w,h)})
-                    # master_mask[image_index_batch].append([torch.cat((mask.unsqueeze(0),) * 3, dim=0)])
+                    ## if its the last element
                     if(image_index_batch==len(targets)-1):
-                        ## last element
+                        
                         master_mask[image_index_batch,:,:,:]=torch.cat((mask.unsqueeze(0),) * 3,dim=0)
-                        # master_mask[image_index_batch]=[torch.cat((mask.unsqueeze(0),) * 3, dim=0)]
                 else:
                     ## key don't exist
                     if(image_index_batch>0):
                         master_mask[image_index_batch,:,:,:]=torch.cat((mask.unsqueeze(0),) * 3,dim=0)
-                        # master_mask=[torch.cat((mask.unsqueeze(0),) * 3, dim=0)]
                         mask=torch.zeros(h,w).to(device)
-                        # batched_targets[image_index_batch]=[torch.cat((mask.unsqueeze(0),) * 3, dim=0)]
                     else:
                         mask=torch.zeros(h,w).to(device)
                         mask=create_bbox_mask(xywh,mask,w,h)
                     
-                    batched_targets[image_index_batch]=[{int(target[1]):xywh_2_xyxy(xywh,w,h)}]
+                    # batched_targets[image_index_batch]=[{int(target[1]):xywh_2_xyxy(xywh,w,h)}]
                     image_index_batch_list.append(image_index_batch)
-                    
-                # if(curr_batch_index==image_index_batch):
-                    
-                #     single_batch_targets.append(int(target[1]))
-                # else:
-                #     master_mask[image_index_batch, :, :, :]=torch.cat((mask.unsqueeze(0),) * 3, dim=0)
-                #     mask=torch.zeros(h,w).to(device)
-                #     mask=create_bbox_mask(xywh,mask,w,h)
-                #     curr_batch_index+=1
-                #     batched_targets.append(single_batch_targets)
-                #     single_batch_targets=[int(target[1])]
-                    
         inverted_mask=1-master_mask
-        # print(len(batched_targets),batched_targets)
-        # batched_targets=torch.tensor(batched_targets)
-    return master_mask,inverted_mask,list(batched_targets.values())
+    return master_mask,inverted_mask
 
-def filter_tensors_for_teacher(tensor_list):
-    filtered_tensors = []
-    for tens in tensor_list:
-        for t in tens:
-            print(f"func tensor size ==> {t.size()}")
-            # Get the last three dimensions of the tensor's size
-            tensor_shape = t.size()[-3:]
-            # Check if the last three dimensions match the desired shape
-            if (tensor_shape == torch.Size([80, 80, 12]) or tensor_shape == torch.Size([40, 40, 12]) or tensor_shape == torch.Size([20, 20, 12])):
-                filtered_tensors.append(t)
-    return filtered_tensors
+# def masked_img_and_inv_masked_img(targets,imgs):
+#     with torch.no_grad():
+#         batch,_,w,h=imgs.size()
+#         device="cpu"
+#         # concat_tensor_list=[]
+#         mask=torch.zeros(h,w).to(device)
+#         # curr_batch_index=0
+#         master_mask=torch.zeros(batch,3,w,h)
+#         # master_mask=[]
+#         batched_targets={}
+#         # single_batch_targets=[]
+#         image_index_batch_list=[]
+#         for target in targets:
+#             xywh=target[-4:]        
+#             image_index_batch=int(target[0])
+#             print(f"img idx target {image_index_batch}-----{target[1]}")
+#             if(image_index_batch<batch):
+#                 # print(f"curr index {curr_batch_index} ** image index {image_index_batch}")
+#                 if(image_index_batch in image_index_batch_list):
+#                     ## key exists
+#                     mask=create_bbox_mask(xywh,mask,w,h)
+#                     batched_targets[image_index_batch].append({int(target[1]):xywh_2_xyxy(xywh,w,h)})
+#                     # master_mask[image_index_batch].append([torch.cat((mask.unsqueeze(0),) * 3, dim=0)])
+#                     if(image_index_batch==len(targets)-1):
+#                         ## last element
+#                         master_mask[image_index_batch,:,:,:]=torch.cat((mask.unsqueeze(0),) * 3,dim=0)
+#                         # master_mask[image_index_batch]=[torch.cat((mask.unsqueeze(0),) * 3, dim=0)]
+#                 else:
+#                     ## key don't exist
+#                     if(image_index_batch>0):
+#                         master_mask[image_index_batch,:,:,:]=torch.cat((mask.unsqueeze(0),) * 3,dim=0)
+#                         # master_mask=[torch.cat((mask.unsqueeze(0),) * 3, dim=0)]
+#                         mask=torch.zeros(h,w).to(device)
+#                         # batched_targets[image_index_batch]=[torch.cat((mask.unsqueeze(0),) * 3, dim=0)]
+#                     else:
+#                         mask=torch.zeros(h,w).to(device)
+#                         mask=create_bbox_mask(xywh,mask,w,h)
+                    
+#                     batched_targets[image_index_batch]=[{int(target[1]):xywh_2_xyxy(xywh,w,h)}]
+#                     image_index_batch_list.append(image_index_batch)
+                    
+#                 # if(curr_batch_index==image_index_batch):
+                    
+#                 #     single_batch_targets.append(int(target[1]))
+#                 # else:
+#                 #     master_mask[image_index_batch, :, :, :]=torch.cat((mask.unsqueeze(0),) * 3, dim=0)
+#                 #     mask=torch.zeros(h,w).to(device)
+#                 #     mask=create_bbox_mask(xywh,mask,w,h)
+#                 #     curr_batch_index+=1
+#                 #     batched_targets.append(single_batch_targets)
+#                 #     single_batch_targets=[int(target[1])]
+                    
+#         inverted_mask=1-master_mask
+#         # print(len(batched_targets),batched_targets)
+#         # batched_targets=torch.tensor(batched_targets)
+#     return master_mask,inverted_mask,list(batched_targets.values())
+
+def update_master_mask(master_mask,xywh,batch_index,image_width,image_height):
+    x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
+    # Check if both starting point coordinates are within mask boundaries
+    if 0 < x1 < image_width and 0 < y1 < image_height:
+        # Check if ending point coordinates are within mask boundaries
+        x2 = min(image_width - 1, x2)
+        y2 = min(image_height - 1, y2)
+        # Create mask
+        print(x1, y1, x2, y2)
+        master_mask[batch_index,0:3,y1:y2+1, x1:x2+1]=1
+    return master_mask
+
+def get_prediction_mask(tcls,tboxs,tindices,batch,image_width,image_height,device):
+    master_mask=torch.zeros(batch,3,image_width,image_height)
+    # print(len(tcls))
+    # print(len(tboxs))
+    # print(len(tindices))
+    if len(tcls) > 0 and len(tboxs) > 0 and len(tindices) > 0:
+        i=0
+        print(tcls[i])
+        print(tboxs[i])
+        print(tindices[i][0])
+        if torch.numel(tcls[i]) > 0 and torch.numel(tboxs[i]) > 0 and len(tindices[i][0]) > 0:
+            # print(f"cls size is ===> {tcls[i].size()}")
+            # print(f"bbox size is ===> {tboxs[i].size()}")
+            # print(f"tindices size is ===> {len(tindices[i][0])}")
+            for tcls,tbox,tin in zip(tcls[i],tboxs[i],tindices[i][0]):
+                master_mask=update_master_mask(master_mask,tbox,tin,image_width,image_height)
+    return master_mask
+
+# def compare_two_mask(gt_mask,pred_mask):
+#     gt_mask = gt_mask.to(torch.int32)
+#     pred_mask = pred_mask.to(torch.int32)
+    
+    
+#     and_mask=gt_mask&pred_mask
+#     num_ones_and_mask = torch.sum(and_mask == 1)
+#     num_ones_gt_mask = torch.sum(gt_mask == 1)
+#     ratio=num_ones_and_mask/num_ones_gt_mask
+#     print(num_ones_and_mask)
+#     print(num_ones_gt_mask)
+#     print(ratio)
+    
+def compare_two_mask(gt_mask, pred_mask):
+    gt_mask = gt_mask.to(torch.int32)
+    pred_mask = pred_mask.to(torch.int32)
+    
+    ratios = []
+    
+    for i in range(gt_mask.size(0)):  # Iterate over each layer
+        # Perform bitwise "and" operation for the current layer
+        and_mask = gt_mask[i] & pred_mask[i]
+        
+        # Count the number of ones in the "and" mask and the ground truth mask
+        num_ones_and_mask = torch.sum(and_mask == 1).item()
+        num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
+        
+        # Calculate the ratio for the current layer
+        if num_ones_gt_mask > 0:
+            ratio = num_ones_and_mask / num_ones_gt_mask
+        else:
+            ratio = 0.0
+        
+        # Append the ratio to the list
+        ratios.append(ratio)
+    print(ratios)
+    
+    return ratios
+
+    
+    # for box in tboxs:
+    #     print(f"bbox is ===> {box.size()}")
+    # # for tanch in tanchors:
+    # #     print(f"anchor is ===> {tanch.size()}")
+    # #     print(f"anchor is ===> {tanch}")
+    # for indice in tindices:
+    #     print(f"label len ===> {len(indice[0])}")
+    #     print(f"label ===> {indice[0]}")
+    #     for ind in indice:
+    #         if(torch.numel(ind)>0):
+    #             ## these indices should be considered
+    #             print(f"label ind len is ===> {len(ind)}")
+    #             print(f"label indices is ===> {ind}")
+# def filter_tensors_for_teacher(tensor_list):
+#     filtered_tensors = []
+#     for tens in tensor_list:
+#         for t in tens:
+#             # print(f"func tensor size ==> {t.size()}")
+#             # Get the last three dimensions of the tensor's size
+#             tensor_shape = t.size()[-3:]
+#             # Check if the last three dimensions match the desired shape
+#             if (tensor_shape == torch.Size([80, 80, 12]) or tensor_shape == torch.Size([40, 40, 12]) or tensor_shape == torch.Size([20, 20, 12])):
+#                 filtered_tensors.append(t)
+#     return filtered_tensors
             
 def build_teacher_targets(tch_model,p, targets):
         """Prepares model targets from input targets (image,class,x,y,w,h) for loss computation, returning class, box,
@@ -477,6 +614,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
     compute_loss = ComputeLoss(model)  # init loss class
+    # teacher_compute_loss=TeacherComputeLoss(teacher_model)
     callbacks.run('on_train_start')
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
@@ -549,12 +687,13 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             with torch.cuda.amp.autocast(amp):
                 targets = targets.to(device)
                 if opt.teacher_weight:
-                    # print(f"targets size ===> {targets.size()}")
+                    print(f"targets size ===> {targets.size()}")
                     # print(f"imgs size ===> {imgs.size()}")
-                    batch_mask,inverted_mask,gt_batch_targets=masked_img_and_inv_masked_img(targets,imgs)
+                    batch_size, _, img_w, img_h = imgs.size()
+                    batch_mask,inverted_mask=masked_img_and_inv_masked_img(targets,imgs)
                     
                     print(f"batched_mask===>{batch_mask.size()}")
-                    print(f"gt batched_targets===>{len(gt_batch_targets)}")
+                    # print(f"gt batched_targets===>{gt_batch_targets}")
                     
                     
                     
@@ -565,33 +704,47 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     std_pred_masked, std_features_masked= model(batch_masked_image, target=targets)  # forward
                     std_pred_masked_inv, std_features_masked_inv= model(batch_inverted_masked_image, target=targets)  # forward
                     # bbox=compute_loss.get_gt_bbox(pred,targets)
+                    
                     tech_pred,tech_features = teacher_model(imgs,target=targets)
                     tech_pred_masked, tech_features_masked= teacher_model(batch_masked_image, target=targets)  # forward
                     tech_pred_masked_inv, tech_features_masked_inv= teacher_model(batch_inverted_masked_image, target=targets)  # forward
+
+                    tech_cls, tech_box, tech_indices, tech_anchors=get_model_performance(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
+                    predicted_master_mask=get_prediction_mask(tech_cls,tech_box,tech_indices,batch_size,img_w,img_h,device)
+                    print(f"predicted_master_mask size===> {predicted_master_mask.size()}")
+                    print(f"predicted_master_mask return count===> {predicted_master_mask.unique(return_counts=True)}")
+                    # print(f"predicted_master_mask ===> {predicted_master_mask}")
+                    compare_two_mask(batch_mask,predicted_master_mask)
+                    # print(f"teacher cls ===> {tech_cls}")
+                    # print(f"teacher indices ===> {tech_indices}")
+                    
+                    # tech_cls, tech_box, tech_indices, tech_anchors= teacher_compute_loss(tech_pred,targets)
+                    # print(f"teacher bbox ===> {tech_box}")
                     # _, teacher_feature, mask = teacher_model(imgs, target=targets)
                     # loss, loss_items = compute_loss(pred, targets, teacher_feature.detach(), stu_feature_adapt(features), mask.detach())  # loss scaled by batch_size
                     # loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(std_features_masked), tech_features_masked.detach(), stu_feature_adapt(std_features_masked_inv), tech_features_masked_inv.detach())  # loss scaled by batch_size
                     
                     # get batch_teacher_with_correct_prediction
                     # print(f"teacher prediction length ===> {len(tech_pred[1])}")
-                    filtered_tech_pred=filter_tensors_for_teacher(tech_pred)
-                    # for fit_teach in fit_outs:
-                    #     print(f"teacher fit pred ==> {fit_teach.size()}")
                     
-                    # for t_pred in tech_pred:
-                    #     for prdctn in t_pred:
-                    #         print(f"teacher pred ==> {prdctn.size()}")
+                    
+                    
+                    # filtered_tech_pred=filter_tensors_for_teacher(tech_pred)
+                    # for fit_teach in filtered_tech_pred:
+                    #     print(f"teacher fit pred ==> {fit_teach.size()}")
+                    # for student_pred in std_pred:
+                    #     print(f"student pred ==> {student_pred.size()}")
                        
-                    print(f"std pred raw ==> {len(std_pred)}")
-                    for std_prd in std_pred:
-                        print(f"std pred 1st layer ==> {std_prd.size()}")
-                        for std_prdctn in std_prd:
-                            print(f"std pred ==> {std_prdctn.size()}")
-                    _tcls,_tbbox,_,_=build_teacher_targets(teacher_model,filtered_tech_pred,targets)
-                    print(f"teacher labels ----------------> {_tcls}")
+                    # print(f"std pred raw ==> {len(std_pred)}")
+                    # for std_prd in std_pred:
+                    #     print(f"std pred 1st layer ==> {std_prd.size()}")
+                    #     for std_prdctn in std_prd:
+                    #         print(f"std pred ==> {std_prdctn.size()}")
+                    # _tcls,_tbbox,_,_= build_teacher_targets(model,std_pred,targets)
+                    # print(f"teacher student labels ----------------> {_tcls}")
                     
                     # teacher_comloss=ComputeLoss(teacher_model)
-                    print(f"gt_batch_targets {gt_batch_targets}")
+                    # print(f"gt_batch_targets {gt_batch_targets}")
                     # print(f"teacher feature size {tech_features_masked.size()}")
                     # print(f"distilled loss {loss}")
                 else:
