@@ -65,14 +65,75 @@ class ComputeLoss:
         self.nl = m.nl  # number of layers
         self.anchors = m.anchors
         self.device = device
-
     def __call__(self, p, targets):  # predictions, targets
         with torch.no_grad():
             lcls = torch.zeros(1, device=self.device)  # class loss
             lbox = torch.zeros(1, device=self.device)  # box loss
             lobj = torch.zeros(1, device=self.device)  # object loss
             tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
-        return tcls, tbox, indices, anchors
+            all_pboxes = []
+            all_indices=[]
+            # print(f'p len ==> {len(p)}')
+            for i, pi in enumerate(p):  # layer index, layer predictions
+                b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
+                # print(f'b size ==> {b.size()}')
+
+                tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
+
+                n = b.shape[0]  # number of targets
+                if n:
+                    pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
+
+                    # Regression
+                    pxy = pxy.sigmoid() * 2 - 0.5
+                    pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
+                    pbox = torch.cat((pxy, pwh), 1)  # predicted box
+                    # pbox=torch.cat(pbox,pbox)
+                    # print(f'pbox size ==> {pbox.size()}')
+                    # Accumulate predicted boxes per batch
+                    # if b not in all_pboxes.keys():
+                    all_indices.append(b)
+                    all_pboxes.append(pbox)
+                    # all_pboxes[b].append(pbox)
+
+            # Concatenate predicted boxes for each batch
+            # concatenated_pboxes = torch.cat([torch.stack(all_pboxes[batch]) for batch in sorted(all_pboxes.keys())])
+        stacked_tensor_indices = torch.cat([t for t in all_indices], dim=0)
+        stacked_tensor_bboxs = torch.cat([t for t in all_pboxes], dim=0)
+        # print(stacked_tensor_indices.size())
+        # print(stacked_tensor_bboxs.size())
+        return stacked_tensor_indices,stacked_tensor_bboxs
+    # def __call__(self, p, targets):  # predictions, targets
+    #     with torch.no_grad():
+    #         lcls = torch.zeros(1, device=self.device)  # class loss
+    #         lbox = torch.zeros(1, device=self.device)  # box loss
+    #         lobj = torch.zeros(1, device=self.device)  # object loss
+    #         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+    #         all_pboxes={}
+            
+    #         # all_indexes=[]
+    #         for i, pi in enumerate(p):  # layer index, layer predictions
+    #             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
+                
+
+    #             # all_indexes.append(b)
+    #             tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
+
+    #             n = b.shape[0]  # number of targets
+    #             if n:
+    #                 # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
+    #                 pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
+
+    #                 # Regression
+    #                 pxy = pxy.sigmoid() * 2 - 0.5
+    #                 pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
+    #                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
+    #                 if(b not in all_pboxes.keys()):
+    #                     all_pboxes[b]=[]
+    #                 all_pboxes[b].append(pbox)
+    #                 # all_pboxes.append(pbox)
+    #     return torch.cat(list(all_pboxes.values()))
+        # return tcls, tbox, indices, anchors
 
 
     def build_targets(self, p, targets):

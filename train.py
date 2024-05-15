@@ -62,7 +62,7 @@ from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
 from utils.loss import ComputeLoss
 # from utils.computeloss import ComputeLoss as TeacherComputeLoss
-from utils.get_teacher_loss import get_model_performance
+from utils.get_teacher_loss import get_teacher_model_label_bbox
 
 
 from utils.metrics import fitness
@@ -129,45 +129,74 @@ def create_bbox_mask(xywh, mask, image_width, image_height):
         mask[y1:y2+1, x1:x2+1] = 1
     return mask
 
+# def generate_prediction_mask(predicted_tensor,xywh,batch_index,image_width,image_height):
+#     # predicted tensor would be in (n,4) form
+#     x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
+#     # Check if both starting point coordinates are within mask boundaries
+#     if 0 < x1 < image_width and 0 < y1 < image_height:
+#         # Check if ending point coordinates are within mask boundaries
+#         x2 = min(image_width - 1, x2)
+#         y2 = min(image_height - 1, y2)
+#         # Create mask
+#         # print(x1, y1, x2, y2)
+#         master_mask[batch_index,0:3,y1:y2+1, x1:x2+1]=1
+#     return master_mask
 
-def masked_img_and_inv_masked_img(targets,imgs):
+
+def masked_img_and_inv_masked_img(targets,imgs,device):
     with torch.no_grad():
         batch,_,w,h=imgs.size()
-        device="cpu"
-        # concat_tensor_list=[]
-        mask=torch.zeros(h,w).to(device)
-        # curr_batch_index=0
-        master_mask=torch.zeros(batch,3,w,h)
-        # master_mask=[]
-        batched_targets={}
-        # single_batch_targets=[]
-        image_index_batch_list=[]
+        master_mask=torch.zeros(batch,3,w,h).to(device)
         for target in targets:
             xywh=target[-4:]        
             image_index_batch=int(target[0])
-            # print(f"img idx target {image_index_batch}-----{target[1]}")
-            if(image_index_batch<batch):
-                # print(f"curr index {curr_batch_index} ** image index {image_index_batch}")
-                if(image_index_batch in image_index_batch_list):
-                    ## key exists
-                    mask=create_bbox_mask(xywh,mask,w,h)
-                    ## if its the last element
-                    if(image_index_batch==len(targets)-1):
-                        
-                        master_mask[image_index_batch,:,:,:]=torch.cat((mask.unsqueeze(0),) * 3,dim=0)
-                else:
-                    ## key don't exist
-                    if(image_index_batch>0):
-                        master_mask[image_index_batch,:,:,:]=torch.cat((mask.unsqueeze(0),) * 3,dim=0)
-                        mask=torch.zeros(h,w).to(device)
-                    else:
-                        mask=torch.zeros(h,w).to(device)
-                        mask=create_bbox_mask(xywh,mask,w,h)
-                    
-                    # batched_targets[image_index_batch]=[{int(target[1]):xywh_2_xyxy(xywh,w,h)}]
-                    image_index_batch_list.append(image_index_batch)
+            x1,y1,x2,y2=xywh_2_xyxy(xywh,w,h)
+            if 0 < x1 < w and 0 < y1 < h:
+                # Check if ending point coordinates are within mask boundaries
+                x2 = min(w - 1, x2)
+                y2 = min(h - 1, y2)
+                master_mask[image_index_batch,0:3,y1:y2+1, x1:x2+1]=1
         inverted_mask=1-master_mask
     return master_mask,inverted_mask
+
+
+# def masked_img_and_inv_masked_img(targets,imgs,device):
+#     with torch.no_grad():
+#         batch,_,w,h=imgs.size()
+#         # concat_tensor_list=[]
+#         mask=torch.zeros(h,w).to(device)
+#         # curr_batch_index=0
+#         master_mask=torch.zeros(batch,3,w,h)
+#         # master_mask=[]
+#         batched_targets={}
+#         # single_batch_targets=[]
+#         image_index_batch_list=[]
+#         for target in targets:
+#             xywh=target[-4:]        
+#             image_index_batch=int(target[0])
+#             # print(f"img idx target {image_index_batch}-----{target[1]}")
+#             if(image_index_batch<batch):
+#                 # print(f"curr index {curr_batch_index} ** image index {image_index_batch}")
+#                 if(image_index_batch in image_index_batch_list):
+#                     ## key exists
+#                     mask=create_bbox_mask(xywh,mask,w,h)
+#                     ## if its the last element
+#                     if(image_index_batch==len(targets)-1):
+                        
+#                         master_mask[image_index_batch,:,:,:]=torch.cat((mask.unsqueeze(0),) * 3,dim=0)
+#                 else:
+#                     ## key don't exist
+#                     if(image_index_batch>0):
+#                         master_mask[image_index_batch,:,:,:]=torch.cat((mask.unsqueeze(0),) * 3,dim=0)
+#                         mask=torch.zeros(h,w).to(device)
+#                     else:
+#                         mask=torch.zeros(h,w).to(device)
+#                         mask=create_bbox_mask(xywh,mask,w,h)
+                    
+#                     # batched_targets[image_index_batch]=[{int(target[1]):xywh_2_xyxy(xywh,w,h)}]
+#                     image_index_batch_list.append(image_index_batch)
+#         inverted_mask=1-master_mask
+#     return master_mask,inverted_mask
 
 # def masked_img_and_inv_masked_img(targets,imgs):
 #     with torch.no_grad():
@@ -234,20 +263,17 @@ def update_master_mask(master_mask,xywh,batch_index,image_width,image_height):
         x2 = min(image_width - 1, x2)
         y2 = min(image_height - 1, y2)
         # Create mask
-        print(x1, y1, x2, y2)
+        # print(x1, y1, x2, y2)
         master_mask[batch_index,0:3,y1:y2+1, x1:x2+1]=1
     return master_mask
 
 def get_prediction_mask(tcls,tboxs,tindices,batch,image_width,image_height,device):
     master_mask=torch.zeros(batch,3,image_width,image_height)
-    # print(len(tcls))
-    # print(len(tboxs))
-    # print(len(tindices))
     if len(tcls) > 0 and len(tboxs) > 0 and len(tindices) > 0:
         i=0
-        print(tcls[i])
-        print(tboxs[i])
-        print(tindices[i][0])
+        # print(tcls[i])
+        # print(tboxs[i])
+        # print(tindices[i][0])
         if torch.numel(tcls[i]) > 0 and torch.numel(tboxs[i]) > 0 and len(tindices[i][0]) > 0:
             # print(f"cls size is ===> {tcls[i].size()}")
             # print(f"bbox size is ===> {tboxs[i].size()}")
@@ -268,135 +294,161 @@ def get_prediction_mask(tcls,tboxs,tindices,batch,image_width,image_height,devic
 #     print(num_ones_and_mask)
 #     print(num_ones_gt_mask)
 #     print(ratio)
+
+def prepare_batch_mask_tensor(tensor_indices,tensor_bbox,batch,image_width,image_height,device):
+    master_mask=torch.zeros(batch,3,image_width,image_height).to(device)
+    for i in range(tensor_indices.size(0)):
+        batch_index=tensor_indices[i]
+        xywh=tensor_bbox[i]
+        
+        x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
+        # Check if both starting point coordinates are within mask boundaries
+        if 0 < x1 < image_width and 0 < y1 < image_height:
+            # Check if ending point coordinates are within mask boundaries
+            x2 = min(image_width - 1, x2)
+            y2 = min(image_height - 1, y2)
+            # Create mask
+            # print(x1, y1, x2, y2)
+            master_mask[batch_index,0:3,y1:y2+1, x1:x2+1]=1
+    return master_mask
+        # for bbox in batch_bbox:
+        #     print(bbox)
+        
     
-def compare_two_mask(gt_mask, pred_mask):
-    gt_mask = gt_mask.to(torch.int32)
-    pred_mask = pred_mask.to(torch.int32)
-    
-    ratios = []
+def compare_two_mask(gt_mask, pred_mask,device,ratio_threshold=0.3):
+    gt_mask = gt_mask.to(torch.int32).to(device)
+    pred_mask = pred_mask.to(torch.int32).to(device)
+    bool_correct_fc = []
     
     for i in range(gt_mask.size(0)):  # Iterate over each layer
         # Perform bitwise "and" operation for the current layer
-        and_mask = gt_mask[i] & pred_mask[i]
+        _,gt_height, gt_width = gt_mask[i].size()
+        # print(gt_mask[i].size())
+        # print(gt_mask[i].unique(return_counts=True))
+        # print(pred_mask[i].unique(return_counts=True))
+        # and_mask = gt_mask[i] & pred_mask[i]
         
         # Count the number of ones in the "and" mask and the ground truth mask
-        num_ones_and_mask = torch.sum(and_mask == 1).item()
+        num_ones_pred_mask = torch.sum(pred_mask[i] == 1).item()
         num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
-        
+        # print(num_ones_pred_mask,num_ones_gt_mask)
+        # print(f"tot_count_gt_and_mask ==> {num_ones_pred_mask}--{num_ones_gt_mask}")
         # Calculate the ratio for the current layer
-        if num_ones_gt_mask > 0:
-            ratio = num_ones_and_mask / num_ones_gt_mask
-        else:
-            ratio = 0.0
-        
-        # Append the ratio to the list
-        ratios.append(ratio)
-    print(ratios)
-    
-    return ratios
-
-    
-    # for box in tboxs:
-    #     print(f"bbox is ===> {box.size()}")
-    # # for tanch in tanchors:
-    # #     print(f"anchor is ===> {tanch.size()}")
-    # #     print(f"anchor is ===> {tanch}")
-    # for indice in tindices:
-    #     print(f"label len ===> {len(indice[0])}")
-    #     print(f"label ===> {indice[0]}")
-    #     for ind in indice:
-    #         if(torch.numel(ind)>0):
-    #             ## these indices should be considered
-    #             print(f"label ind len is ===> {len(ind)}")
-    #             print(f"label indices is ===> {ind}")
-# def filter_tensors_for_teacher(tensor_list):
-#     filtered_tensors = []
-#     for tens in tensor_list:
-#         for t in tens:
-#             # print(f"func tensor size ==> {t.size()}")
-#             # Get the last three dimensions of the tensor's size
-#             tensor_shape = t.size()[-3:]
-#             # Check if the last three dimensions match the desired shape
-#             if (tensor_shape == torch.Size([80, 80, 12]) or tensor_shape == torch.Size([40, 40, 12]) or tensor_shape == torch.Size([20, 20, 12])):
-#                 filtered_tensors.append(t)
-#     return filtered_tensors
-            
-def build_teacher_targets(tch_model,p, targets):
-        """Prepares model targets from input targets (image,class,x,y,w,h) for loss computation, returning class, box,
-        indices, and anchors.
-        """
-        
-        # self.balance = {3: [4.0, 1.0, 0.4]}.get(m.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
-        # self.ssi = list(m.stride).index(16) if autobalance else 0  # stride 16 index
-        # self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
-        
-        m = de_parallel(tch_model).model[-1]  # Detect() module
-        hyp=tch_model.hyp
-        na = m.na
-        nl=m.nl
-        device = next(tch_model.parameters()).device
-        anchors=m.anchors
-        na, nt = na, targets.shape[0]  # number of anchors, targets
-        tcls, tbox, indices, anch = [], [], [], []
-        gain = torch.ones(7, device=device)  # normalized to gridspace gain
-        ai = torch.arange(na, device=device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
-        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # append anchor indices
-
-        g = 0.5  # bias
-        off = (
-            torch.tensor(
-                [
-                    [0, 0],
-                    [1, 0],
-                    [0, 1],
-                    [-1, 0],
-                    [0, -1],  # j,k,l,m
-                    # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
-                ],
-                device=device,
-            ).float()
-            * g
-        )  # offsets
-
-        for i in range(nl):
-            anchors, shape = anchors[i], p[i].shape
-            # print(f"tlossmod shape ===> {shape}")
-            gain[2:6] = torch.tensor(shape)[[3, 2, 3, 2]]  # xyxy gain
-
-            # Match targets to anchors
-            t = targets * gain  # shape(3,n,7)
-            if nt:
-                # Matches
-                r = t[..., 4:6] / anchors[:, None]  # wh ratio
-                j = torch.max(r, 1 / r).max(2)[0] < hyp["anchor_t"]  # compare
-                # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
-                t = t[j]  # filter
-
-                # Offsets
-                gxy = t[:, 2:4]  # grid xy
-                gxi = gain[[2, 3]] - gxy  # inverse
-                j, k = ((gxy % 1 < g) & (gxy > 1)).T
-                l, m = ((gxi % 1 < g) & (gxi > 1)).T
-                j = torch.stack((torch.ones_like(j), j, k, l, m))
-                t = t.repeat((5, 1, 1))[j]
-                offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]
+        if num_ones_gt_mask > 0 or num_ones_pred_mask>0:
+            pred_error_count=(num_ones_pred_mask-num_ones_gt_mask)
+            error_ratio = pred_error_count/(gt_width*gt_height*3)
+            # print(pred_error_count,error_ratio)
+            if(pred_error_count>=0 and error_ratio>ratio_threshold):
+                bool_correct_fc.append(0)
             else:
-                t = targets[0]
-                offsets = 0
+                bool_correct_fc.append(1)
+                # print("lets accept this")
+    print(bool_correct_fc)
+    # ratios= [1 if x >= 0.5 else 0 for x in ratio]
+    return bool_correct_fc
 
-            # Define
-            bc, gxy, gwh, a = t.chunk(4, 1)  # (image, class), grid xy, grid wh, anchors
-            a, (b, c) = a.long().view(-1), bc.long().T  # anchors, image, class
-            gij = (gxy - offsets).long()
-            gi, gj = gij.T  # grid indices
+    
+#     # for box in tboxs:
+#     #     print(f"bbox is ===> {box.size()}")
+#     # # for tanch in tanchors:
+#     # #     print(f"anchor is ===> {tanch.size()}")
+#     # #     print(f"anchor is ===> {tanch}")
+#     # for indice in tindices:
+#     #     print(f"label len ===> {len(indice[0])}")
+#     #     print(f"label ===> {indice[0]}")
+#     #     for ind in indice:
+#     #         if(torch.numel(ind)>0):
+#     #             ## these indices should be considered
+#     #             print(f"label ind len is ===> {len(ind)}")
+#     #             print(f"label indices is ===> {ind}")
+# # def filter_tensors_for_teacher(tensor_list):
+# #     filtered_tensors = []
+# #     for tens in tensor_list:
+# #         for t in tens:
+# #             # print(f"func tensor size ==> {t.size()}")
+# #             # Get the last three dimensions of the tensor's size
+# #             tensor_shape = t.size()[-3:]
+# #             # Check if the last three dimensions match the desired shape
+# #             if (tensor_shape == torch.Size([80, 80, 12]) or tensor_shape == torch.Size([40, 40, 12]) or tensor_shape == torch.Size([20, 20, 12])):
+# #                 filtered_tensors.append(t)
+# #     return filtered_tensors
+            
+# def build_teacher_targets(tch_model,p, targets):
+#         """Prepares model targets from input targets (image,class,x,y,w,h) for loss computation, returning class, box,
+#         indices, and anchors.
+#         """
+        
+#         # self.balance = {3: [4.0, 1.0, 0.4]}.get(m.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
+#         # self.ssi = list(m.stride).index(16) if autobalance else 0  # stride 16 index
+#         # self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
+        
+#         m = de_parallel(tch_model).model[-1]  # Detect() module
+#         hyp=tch_model.hyp
+#         na = m.na
+#         nl=m.nl
+#         device = next(tch_model.parameters()).device
+#         anchors=m.anchors
+#         na, nt = na, targets.shape[0]  # number of anchors, targets
+#         tcls, tbox, indices, anch = [], [], [], []
+#         gain = torch.ones(7, device=device)  # normalized to gridspace gain
+#         ai = torch.arange(na, device=device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
+#         targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # append anchor indices
 
-            # Append
-            indices.append((b, a, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1)))  # image, anchor, grid
-            tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
-            anch.append(anchors[a])  # anchors
-            tcls.append(c)  # class
+#         g = 0.5  # bias
+#         off = (
+#             torch.tensor(
+#                 [
+#                     [0, 0],
+#                     [1, 0],
+#                     [0, 1],
+#                     [-1, 0],
+#                     [0, -1],  # j,k,l,m
+#                     # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
+#                 ],
+#                 device=device,
+#             ).float()
+#             * g
+#         )  # offsets
 
-        return tcls, tbox, indices, anch
+#         for i in range(nl):
+#             anchors, shape = anchors[i], p[i].shape
+#             # print(f"tlossmod shape ===> {shape}")
+#             gain[2:6] = torch.tensor(shape)[[3, 2, 3, 2]]  # xyxy gain
+
+#             # Match targets to anchors
+#             t = targets * gain  # shape(3,n,7)
+#             if nt:
+#                 # Matches
+#                 r = t[..., 4:6] / anchors[:, None]  # wh ratio
+#                 j = torch.max(r, 1 / r).max(2)[0] < hyp["anchor_t"]  # compare
+#                 # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
+#                 t = t[j]  # filter
+
+#                 # Offsets
+#                 gxy = t[:, 2:4]  # grid xy
+#                 gxi = gain[[2, 3]] - gxy  # inverse
+#                 j, k = ((gxy % 1 < g) & (gxy > 1)).T
+#                 l, m = ((gxi % 1 < g) & (gxi > 1)).T
+#                 j = torch.stack((torch.ones_like(j), j, k, l, m))
+#                 t = t.repeat((5, 1, 1))[j]
+#                 offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]
+#             else:
+#                 t = targets[0]
+#                 offsets = 0
+
+#             # Define
+#             bc, gxy, gwh, a = t.chunk(4, 1)  # (image, class), grid xy, grid wh, anchors
+#             a, (b, c) = a.long().view(-1), bc.long().T  # anchors, image, class
+#             gij = (gxy - offsets).long()
+#             gi, gj = gij.T  # grid indices
+
+#             # Append
+#             indices.append((b, a, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1)))  # image, anchor, grid
+#             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
+#             anch.append(anchors[a])  # anchors
+#             tcls.append(c)  # class
+
+#         return tcls, tbox, indices, anch
 
 
 def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictionary
@@ -690,16 +742,16 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     print(f"targets size ===> {targets.size()}")
                     # print(f"imgs size ===> {imgs.size()}")
                     batch_size, _, img_w, img_h = imgs.size()
-                    batch_mask,inverted_mask=masked_img_and_inv_masked_img(targets,imgs)
+                    batch_mask,inverted_mask=masked_img_and_inv_masked_img(targets,imgs,device)
                     
-                    print(f"batched_mask===>{batch_mask.size()}")
+                    
                     # print(f"gt batched_targets===>{gt_batch_targets}")
                     
                     
                     
                     batch_masked_image=imgs*batch_mask
                     batch_inverted_masked_image=imgs*inverted_mask
-                    # print(f"returned unique ===> {returned_masks.unique(return_counts=True)}")
+                    # print(f"returned unique ===> {batch_mask.unique(return_counts=True)}")
                     std_pred,std_features = model(imgs,target=targets)
                     std_pred_masked, std_features_masked= model(batch_masked_image, target=targets)  # forward
                     std_pred_masked_inv, std_features_masked_inv= model(batch_inverted_masked_image, target=targets)  # forward
@@ -709,20 +761,27 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     tech_pred_masked, tech_features_masked= teacher_model(batch_masked_image, target=targets)  # forward
                     tech_pred_masked_inv, tech_features_masked_inv= teacher_model(batch_inverted_masked_image, target=targets)  # forward
 
-                    tech_cls, tech_box, tech_indices, tech_anchors=get_model_performance(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
-                    predicted_master_mask=get_prediction_mask(tech_cls,tech_box,tech_indices,batch_size,img_w,img_h,device)
-                    print(f"predicted_master_mask size===> {predicted_master_mask.size()}")
-                    print(f"predicted_master_mask return count===> {predicted_master_mask.unique(return_counts=True)}")
+                    ## dataset,names,hyp,nc,device,weights,imgs,targets
+                    tensor_batch_index,tensor_bbox=get_teacher_model_label_bbox(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
+                    prediction_mask=prepare_batch_mask_tensor(tensor_batch_index,tensor_bbox,batch_size,img_w, img_h,device)
+                    # print(f"prediction_mask ===> {prediction_mask.size()}")
+                    # print(f"prediction mask unique ===> {prediction_mask.unique(return_counts=True)}")
+                    
+                    # predicted_master_mask=get_prediction_mask(tech_cls,tech_box,tech_indices,batch_size,img_w,img_h,device)
+                    # print(f"predicted_master_mask size===> {predicted_master_mask.size()}")
+                    # print(f"predicted_master_mask return count===> {predicted_master_mask.unique(return_counts=True)}")
+                    # print(f"gt_batched_mask===> {batch_mask.unique(return_counts=True)}")
+                    
                     # print(f"predicted_master_mask ===> {predicted_master_mask}")
-                    compare_two_mask(batch_mask,predicted_master_mask)
-                    # print(f"teacher cls ===> {tech_cls}")
+                    teacher_focused_feature_index=compare_two_mask(batch_mask,prediction_mask,device)
+                    print(f"teacher_focused_feature_index ===> {teacher_focused_feature_index}")
                     # print(f"teacher indices ===> {tech_indices}")
                     
                     # tech_cls, tech_box, tech_indices, tech_anchors= teacher_compute_loss(tech_pred,targets)
                     # print(f"teacher bbox ===> {tech_box}")
                     # _, teacher_feature, mask = teacher_model(imgs, target=targets)
                     # loss, loss_items = compute_loss(pred, targets, teacher_feature.detach(), stu_feature_adapt(features), mask.detach())  # loss scaled by batch_size
-                    # loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(std_features_masked), tech_features_masked.detach(), stu_feature_adapt(std_features_masked_inv), tech_features_masked_inv.detach())  # loss scaled by batch_size
+                    loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(std_features_masked), tech_features_masked.detach(),teacher_focused_feature_index)  # loss scaled by batch_size
                     
                     # get batch_teacher_with_correct_prediction
                     # print(f"teacher prediction length ===> {len(tech_pred[1])}")

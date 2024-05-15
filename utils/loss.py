@@ -225,7 +225,7 @@ class ComputeLoss:
         
         return lbox,lobj,lcls
             
-    def __call__(self,p,targets,student=None, teacher=None, student_inv=None,teacher_inv=None):  # predictions, targets, model
+    def __call__(self,p,targets,student=None, teacher=None, teacher_accepted_batch=None):  # predictions, targets, model
         
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
         
@@ -233,17 +233,17 @@ class ComputeLoss:
         
         # print(f"teacher targets ===> {tcls}")
         lbox,lobj,lcls=self.get_lcls_lbox_lobj(p,tcls, tbox, indices, anchors)
-        
-        distillation_factor=0.9
-        foward_factor,backward_factor=0.8,0.5        
-        # roi_loss=feature_cross_entropy(teacher,student)
-        # roi_inv_loss=feature_cross_entropy(student_inv,teacher_inv)
-        roi_loss=feature_mse(student,teacher)
-        roi_inv_loss=feature_mse(student_inv,teacher_inv)
-        total_loss=foward_factor*roi_loss+backward_factor*roi_inv_loss
-        total_loss=total_loss+lbox+lobj+lcls
-        
-        return (total_loss) * distillation_factor, torch.cat((lbox, lobj, lcls)).detach()
+        roi_loss=torch.zeros(1, device=self.device)
+        distillation_factor=0.5
+        if(teacher_accepted_batch!=None):
+            for index,single_item in enumerate(teacher_accepted_batch):
+                if(single_item==1):
+                    roi_loss+=torch.tensor(feature_mse(student[index],teacher[index]))
+            roi_loss=roi_loss/sum(teacher_accepted_batch)
+            # roi_inv_loss=feature_mse(student_inv,teacher_inv)
+            # total_loss=foward_factor*roi_loss+backward_factor*roi_inv_loss
+        total_loss=distillation_factor*roi_loss+lbox+lobj+lcls
+        return total_loss, torch.cat((lbox, lobj, lcls)).detach()
 
     # def __call__(self, p, targets, teacher=None, student=None, mask=None):  # predictions, targets, model
     #     lcls = torch.zeros(1, device=self.device)  # class loss
