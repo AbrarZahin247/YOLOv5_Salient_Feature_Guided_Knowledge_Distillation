@@ -103,38 +103,6 @@ class ComputeLoss:
         # print(stacked_tensor_indices.size())
         # print(stacked_tensor_bboxs.size())
         return stacked_tensor_indices,stacked_tensor_bboxs
-    # def __call__(self, p, targets):  # predictions, targets
-    #     with torch.no_grad():
-    #         lcls = torch.zeros(1, device=self.device)  # class loss
-    #         lbox = torch.zeros(1, device=self.device)  # box loss
-    #         lobj = torch.zeros(1, device=self.device)  # object loss
-    #         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
-    #         all_pboxes={}
-            
-    #         # all_indexes=[]
-    #         for i, pi in enumerate(p):  # layer index, layer predictions
-    #             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-                
-
-    #             # all_indexes.append(b)
-    #             tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
-
-    #             n = b.shape[0]  # number of targets
-    #             if n:
-    #                 # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
-    #                 pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
-
-    #                 # Regression
-    #                 pxy = pxy.sigmoid() * 2 - 0.5
-    #                 pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
-    #                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
-    #                 if(b not in all_pboxes.keys()):
-    #                     all_pboxes[b]=[]
-    #                 all_pboxes[b].append(pbox)
-    #                 # all_pboxes.append(pbox)
-    #     return torch.cat(list(all_pboxes.values()))
-        # return tcls, tbox, indices, anchors
-
 
     def build_targets(self, p, targets):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
@@ -162,7 +130,7 @@ class ComputeLoss:
 
         for i in range(self.nl):
             anchors, shape = self.anchors[i], p[i].shape
-            print(f"build target shape ===> {shape}")
+            # print(f"build target shape ===> {shape}")
             gain[2:6] = torch.tensor(shape)[[3, 2, 3, 2]]  # xyxy gain
 
             # Match targets to anchors
