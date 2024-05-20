@@ -111,111 +111,266 @@ def xywh_2_xyxy(xywh,image_width,image_height):
     return x1,y1,x2,y2
 
 
-def create_bbox_mask(xywh, mask, image_width, image_height):
-    x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
-    # Check if both starting point coordinates are within mask boundaries
-    if 0 <= x1 < image_width and 0 <= y1 < image_height:
-        # Check if ending point coordinates are within mask boundaries
-        x2 = min(image_width - 1, x2)
-        y2 = min(image_height - 1, y2)
-        # Create mask
-        mask[y1:y2+1, x1:x2+1] = 1
-    return mask
+# def create_bbox_mask(xywh, mask, image_width, image_height):
+#     x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
+#     # Check if both starting point coordinates are within mask boundaries
+#     if 0 <= x1 < image_width and 0 <= y1 < image_height:
+#         # Check if ending point coordinates are within mask boundaries
+#         x2 = min(image_width - 1, x2)
+#         y2 = min(image_height - 1, y2)
+#         # Create mask
+#         mask[y1:y2+1, x1:x2+1] = 1
+#     return mask
 
-def masked_img_and_inv_masked_img(targets,batch,width,height,device):
-    with torch.no_grad():
-        master_mask=torch.zeros(batch,3,width,height).to(device)
-        for target in targets:
-            xywh=target[-4:]        
-            image_index_batch=int(target[0])
-            x1,y1,x2,y2=xywh_2_xyxy(xywh,width,height)
-            if 0 < x1 < width and 0 < y1 < height:
-                # Check if ending point coordinates are within mask boundaries
-                x2 = min(width - 1, x2)
-                y2 = min(height - 1, y2)
-                master_mask[image_index_batch,0:3,y1:y2+1, x1:x2+1]=1
-        inverted_mask=1-master_mask
-    return master_mask,inverted_mask
+## efficent optimized function
 
-def update_master_mask(master_mask,xywh,batch_index,image_width,image_height):
-    x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
-    # Check if both starting point coordinates are within mask boundaries
-    if 0 < x1 < image_width and 0 < y1 < image_height:
-        # Check if ending point coordinates are within mask boundaries
-        x2 = min(image_width - 1, x2)
-        y2 = min(image_height - 1, y2)
-        # Create mask
-        # print(x1, y1, x2, y2)
-        master_mask[batch_index,0:3,y1:y2+1, x1:x2+1]=1
-    return master_mask
+def prepare_batch_mask_tensor(tensor_indices, tensor_bbox, batch, image_width, image_height, device):
+    prediction_mask = torch.zeros(batch, 3, image_width, image_height, device=device)
+    tensor_indices = tensor_indices.to(device)
+    tensor_bbox = tensor_bbox.to(device)
 
-def get_prediction_mask(tcls,tboxs,tindices,batch,image_width,image_height,device):
-    master_mask=torch.zeros(batch,3,image_width,image_height)
-    if len(tcls) > 0 and len(tboxs) > 0 and len(tindices) > 0:
-        i=0
-        # print(tcls[i])
-        # print(tboxs[i])
-        # print(tindices[i][0])
-        if torch.numel(tcls[i]) > 0 and torch.numel(tboxs[i]) > 0 and len(tindices[i][0]) > 0:
-            # print(f"cls size is ===> {tcls[i].size()}")
-            # print(f"bbox size is ===> {tboxs[i].size()}")
-            # print(f"tindices size is ===> {len(tindices[i][0])}")
-            for tcls,tbox,tin in zip(tcls[i],tboxs[i],tindices[i][0]):
-                master_mask=update_master_mask(master_mask,tbox,tin,image_width,image_height)
-    return master_mask
-
-
-def prepare_batch_mask_tensor(tensor_indices,tensor_bbox,batch,image_width,image_height,device):
-    master_mask=torch.zeros(batch,3,image_width,image_height).to(device)
     for i in range(tensor_indices.size(0)):
-        batch_index=tensor_indices[i]
-        xywh=tensor_bbox[i]
-        
+        batch_index = tensor_indices[i]
+        xywh = tensor_bbox[i]
         x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
-        # Check if both starting point coordinates are within mask boundaries
+
         if 0 < x1 < image_width and 0 < y1 < image_height:
-            # Check if ending point coordinates are within mask boundaries
             x2 = min(image_width - 1, x2)
             y2 = min(image_height - 1, y2)
-            # Create mask
-            # print(x1, y1, x2, y2)
-            master_mask[batch_index,0:3,y1:y2+1, x1:x2+1]=1
-    return master_mask
-        # for bbox in batch_bbox:
-        #     print(bbox)
-        
-    
-def compare_two_mask(gt_mask, pred_mask,device,ratio_threshold=0.3):
+            prediction_mask[batch_index, :, y1:y2 + 1, x1:x2 + 1] = 1
+
+    return prediction_mask
+
+def compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.33):
     gt_mask = gt_mask.to(torch.int32).to(device)
     pred_mask = pred_mask.to(torch.int32).to(device)
     bool_correct_fc = []
-    
-    for i in range(gt_mask.size(0)):  # Iterate over each layer
-        # Perform bitwise "and" operation for the current layer
-        _,gt_height, gt_width = gt_mask[i].size()
-        # print(gt_mask[i].size())
-        # print(gt_mask[i].unique(return_counts=True))
-        # print(pred_mask[i].unique(return_counts=True))
-        # and_mask = gt_mask[i] & pred_mask[i]
-        
-        # Count the number of ones in the "and" mask and the ground truth mask
+
+    for i in range(gt_mask.size(0)):
+        _, gt_height, gt_width = gt_mask[i].size()
         num_ones_pred_mask = torch.sum(pred_mask[i] == 1).item()
         num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
-        # print(num_ones_pred_mask,num_ones_gt_mask)
-        # print(f"tot_count_gt_and_mask ==> {num_ones_pred_mask}--{num_ones_gt_mask}")
-        # Calculate the ratio for the current layer
-        if num_ones_gt_mask > 0 or num_ones_pred_mask>0:
-            pred_error_count=(num_ones_pred_mask-num_ones_gt_mask)
-            error_ratio = pred_error_count/(gt_width*gt_height*3)
-            # print(pred_error_count,error_ratio)
-            if(pred_error_count>=0 and error_ratio>ratio_threshold):
+
+        if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
+            pred_error_count = (num_ones_pred_mask - num_ones_gt_mask)
+            error_ratio = pred_error_count / (gt_width * gt_height * 3)
+            if pred_error_count >= 0 and error_ratio > ratio_threshold:
                 bool_correct_fc.append(0)
             else:
                 bool_correct_fc.append(1)
-                # print("lets accept this")
-    # print(bool_correct_fc)
-    # ratios= [1 if x >= 0.5 else 0 for x in ratio]
+
     return bool_correct_fc
+
+def prepare_gt_mask_and_inverted_mask(ground_truths, batch_size, width, height, device):
+    with torch.no_grad():
+        ground_truth_mask = torch.zeros(batch_size, 3, width, height, device=device)
+        for gt in ground_truths:
+            image_index_batch = int(gt[0])
+            xywh = gt[-4:]
+            x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
+
+            if 0 < x1 < width and 0 < y1 < height:
+                x2 = min(width - 1, x2)
+                y2 = min(height - 1, y2)
+                ground_truth_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 1
+
+        inverted_mask = 1 - ground_truth_mask
+
+    return ground_truth_mask, inverted_mask
+
+
+# def prepare_batch_mask_tensor(tensor_indices, tensor_bbox, batch, image_width, image_height, device):
+#     prediction_mask = torch.zeros(batch, 3, image_width, image_height, device=device)
+#     tensor_indices = tensor_indices.to(device)
+#     tensor_bbox = tensor_bbox.to(device)
+
+#     for i in range(tensor_indices.size(0)):
+#         batch_index = tensor_indices[i]
+#         xywh = tensor_bbox[i]
+#         x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
+
+#         if 0 < x1 < image_width and 0 < y1 < image_height:
+#             x2 = min(image_width - 1, x2)
+#             y2 = min(image_height - 1, y2)
+#             prediction_mask[batch_index, :, y1:y2 + 1, x1:x2 + 1] = 1
+
+#     return prediction_mask
+
+# def prepare_gt_mask_and_inverted_mask(ground_truths, batch_size, width, height, device):
+#     with torch.no_grad():
+#         ground_truth_mask = torch.zeros(batch_size, 3, width, height, device=device)
+#         for gt in ground_truths:
+#             image_index_batch = int(gt[0])
+#             xywh = gt[-4:]
+#             x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
+
+#             if 0 < x1 < width and 0 < y1 < height:
+#                 x2 = min(width - 1, x2)
+#                 y2 = min(height - 1, y2)
+#                 ground_truth_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 1
+
+#         inverted_mask = 1 - ground_truth_mask
+
+#     return ground_truth_mask, inverted_mask
+
+# def compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3):
+#     gt_mask = gt_mask.to(torch.int32).to(device)
+#     pred_mask = pred_mask.to(torch.int32).to(device)
+#     bool_correct_fc = []
+
+#     for i in range(gt_mask.size(0)):
+#         _, gt_height, gt_width = gt_mask[i].size()
+#         num_ones_pred_mask = torch.sum(pred_mask[i] == 1).item()
+#         num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
+
+#         if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
+#             pred_error_count = (num_ones_pred_mask - num_ones_gt_mask)
+#             error_ratio = pred_error_count / (gt_width * gt_height * 3)
+#             if pred_error_count >= 0 and error_ratio > ratio_threshold:
+#                 bool_correct_fc.append(0)
+#             else:
+#                 bool_correct_fc.append(1)
+
+#     return bool_correct_fc
+
+# def masked_img_and_inv_masked_img(ground_truths, batch, width, height, device):
+#     with torch.no_grad():
+#         ground_truth_mask = torch.zeros(batch, 3, width, height, device=device)
+#         for gt in ground_truths:
+#             image_index_batch = int(gt[0])
+#             xywh = gt[-4:]
+#             x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
+
+#             if 0 < x1 < width and 0 < y1 < height:
+#                 x2 = min(width - 1, x2)
+#                 y2 = min(height - 1, y2)
+#                 ground_truth_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 1
+
+#         inverted_mask = 1 - ground_truth_mask
+
+#     return ground_truth_mask, inverted_mask
+
+
+
+
+# def masked_img_and_inv_masked_img(targets, batch, width, height, device):
+#     with torch.no_grad():
+#         master_mask = torch.zeros(batch, 3, width, height, device=device)
+#         inverted_mask = torch.ones(batch, 3, width, height, device=device)
+
+#         for target in targets:
+#             xywh = target[-4:]
+#             image_index_batch = int(target[0])
+#             x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
+            
+#             # Ensure coordinates are within image boundaries
+#             x1 = max(0, min(width - 1, x1))
+#             y1 = max(0, min(height - 1, y1))
+#             x2 = max(0, min(width - 1, x2))
+#             y2 = max(0, min(height - 1, y2))
+
+#             # Update master_mask
+#             master_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 1
+            
+#             # Update inverted_mask
+#             inverted_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 0
+
+#     return master_mask, inverted_mask
+
+# def get_teacher_model_label_bbox(dataset, names, hyp, nc, device, teacher_weight, given_images, targets):
+#     teacher_ckpt = torch.load(teacher_weight, map_location=device) 
+#     teacher_model = Model(teacher_ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device) 
+    
+#     teacher_model.nc = nc
+#     teacher_model.hyp = hyp
+#     teacher_model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc
+#     teacher_model.names = names
+    
+#     with torch.no_grad():
+#         pred = teacher_model(given_images)
+#         compute_teacher_loss = ComputeLoss(teacher_model)
+#         pboxes = compute_teacher_loss(pred, targets.to(device))
+    
+#     return pboxes
+
+
+# def process_targets(targets, tensor_indices, tensor_bbox, image_width, image_height, ratio_threshold=0.3):
+#     # Prepare mask tensor for ground truth
+#     master_mask = torch.zeros((image_height, image_width), dtype=torch.float32)
+#     for target in targets:
+#         xywh = target[-4:]
+#         image_index_batch = int(target[0])
+#         x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
+#         if 0 < x1 < image_width and 0 < y1 < image_height:
+#             x2 = min(image_width - 1, x2)
+#             y2 = min(image_height - 1, y2)
+#             master_mask[y1:y2+1, x1:x2+1] = 1.0
+    
+#     # Prepare mask tensor for predictions
+#     pred_mask = torch.zeros_like(master_mask, dtype=torch.int32)
+#     for i in range(tensor_indices.size(0)):
+#         xywh = tensor_bbox[i]
+#         x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
+#         if 0 < x1 < image_width and 0 < y1 < image_height:
+#             x2 = min(image_width - 1, x2)
+#             y2 = min(image_height - 1, y2)
+#             pred_mask[y1:y2+1, x1:x2+1] = 1
+    
+#     # Compare masks
+#     bool_correct_fc = []
+#     for i in range(tensor_indices.size(0)):
+#         gt_height, gt_width = master_mask.size()
+#         num_ones_pred_mask = torch.sum(pred_mask == 1).item()
+#         num_ones_gt_mask = torch.sum(master_mask == 1).item()
+        
+#         if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
+#             pred_error_count = num_ones_pred_mask - num_ones_gt_mask
+#             error_ratio = pred_error_count / (gt_width * gt_height * 3)
+            
+#             if pred_error_count >= 0 and error_ratio > ratio_threshold:
+#                 bool_correct_fc.append(0)
+#             else:
+#                 bool_correct_fc.append(1)
+                
+#     return bool_correct_fc
+
+
+
+
+# def prepare_and_compare_masks(targets, batch, width, height, device, ratio_threshold=0.3):
+#     master_mask = torch.zeros(batch, 3, width, height, device=device)
+#     _, inverted_mask = masked_img_and_inv_masked_img(targets, batch, width, height, device)
+#     bool_correct_fc = []
+    
+#     for target in targets:
+#         batch_index = int(target[0])
+#         xywh = target[-4:]
+#         x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
+
+#         if 0 < x1 < width and 0 < y1 < height:
+#             x2 = min(width - 1, x2)
+#             y2 = min(height - 1, y2)
+#             master_mask[batch_index, 0:3, y1:y2+1, x1:x2+1] = 1
+    
+#     gt_mask = inverted_mask.to(torch.int32)
+#     pred_mask = master_mask.to(torch.int32)
+    
+#     for i in range(gt_mask.size(0)):
+#         _, gt_height, gt_width = gt_mask[i].size()
+#         num_ones_pred_mask = torch.sum(pred_mask[i] == 1).item()
+#         num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
+        
+#         if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
+#             pred_error_count = num_ones_pred_mask - num_ones_gt_mask
+#             error_ratio = pred_error_count / (gt_width * gt_height * 3)
+            
+#             if pred_error_count >= 0 and error_ratio > ratio_threshold:
+#                 bool_correct_fc.append(0)
+#             else:
+#                 bool_correct_fc.append(1)
+                
+#     return bool_correct_fc
+
 
 
 def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictionary
@@ -522,13 +677,24 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     # tech_pred_masked_inv, tech_features_masked_inv= teacher_model(batch_inverted_masked_image, target=targets)  # forward
 
                     ## dataset,names,hyp,nc,device,weights,imgs,targets
-                    mask_calc_device="cpu"
+                    # mask_calc_device="cpu"
+                    
                     tensor_batch_index,tensor_bbox=get_teacher_model_label_bbox(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
-                    prediction_mask=prepare_batch_mask_tensor(tensor_batch_index,tensor_bbox,batch_size,img_w, img_h,mask_calc_device)
+                    pred_mask=prepare_batch_mask_tensor(tensor_batch_index, tensor_bbox, batch_size, img_w, img_h, device)
+                    
+                    gt_mask,inv_gt_mask=prepare_gt_mask_and_inverted_mask(targets,batch_size,img_w,img_h,device)
+                    
+                    teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
+                    # print(f"focused_feature_index ==> {teacher_focused_feature_index}")
+                    
+                    
+                    
+                    
+                    # teacher_focused_feature_index=prepare_batch_mask_tensor(tensor_batch_index,tensor_bbox,batch_size,img_w, img_h,mask_calc_device)
                     
                     ## here all ways give full image for mask generation
-                    batch_mask,inverted_mask=masked_img_and_inv_masked_img(targets,batch_size,img_w,img_h,mask_calc_device)
-                    teacher_focused_feature_index=compare_two_mask(batch_mask,prediction_mask,mask_calc_device)
+                    # batch_mask,inverted_mask=masked_img_and_inv_masked_img(targets,batch_size,img_w,img_h,mask_calc_device)
+                    # teacher_focused_feature_index=compare_two_mask(batch_mask,prediction_mask,mask_calc_device)
                     # print(f"teacher_focused_feature_index ===> {teacher_focused_feature_index}")
                     # print(f"teacher indices ===> {tech_indices}")
 
