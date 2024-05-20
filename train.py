@@ -144,24 +144,46 @@ def prepare_batch_mask_tensor(tensor_indices, tensor_bbox, batch, image_width, i
 def compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.33):
     gt_mask = gt_mask.to(torch.int32).to(device)
     pred_mask = pred_mask.to(torch.int32).to(device)
-    bool_correct_fc = []
 
-    for i in range(gt_mask.size(0)):
-        _, gt_height, gt_width = gt_mask[i].size()
-        num_ones_pred_mask = torch.sum(pred_mask[i] == 1).item()
-        num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
+    num_ones_pred_mask = torch.sum(pred_mask == 1, dim=(1, 2))
+    num_ones_gt_mask = torch.sum(gt_mask == 1, dim=(1, 2))
+    # print(f"num_ones_pred_mask ==> {num_ones_pred_mask.size()}")
+    # print(f"num_ones_gt_mask ==> {num_ones_gt_mask.size()}")
 
-        if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
-            pred_error_count = (num_ones_pred_mask - num_ones_gt_mask)
-            error_ratio = pred_error_count / (gt_width * gt_height * 3)
-            if pred_error_count >= 0 and error_ratio > ratio_threshold:
-                bool_correct_fc.append(0)
-            else:
-                bool_correct_fc.append(1)
 
-    return bool_correct_fc
 
-def prepare_gt_mask_and_inverted_mask(ground_truths, batch_size, width, height, device):
+    pred_error_count = num_ones_pred_mask - num_ones_gt_mask
+    mask_sizes = gt_mask.size(1) * gt_mask.size(2) * 3
+    error_ratios = pred_error_count.float() / mask_sizes
+    average_error_ratios = torch.mean(error_ratios, dim=1)
+    
+    # print(f"average error ratios ==> {average_error_ratios}")
+    result_list = [1 if x > 0 else 0 for x in average_error_ratios]
+    # bool_correct_fc = (pred_error_count >= 0) & (error_ratios <= ratio_threshold)
+
+    return result_list
+
+# def compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.33):
+#     gt_mask = gt_mask.to(torch.int32).to(device)
+#     pred_mask = pred_mask.to(torch.int32).to(device)
+#     bool_correct_fc = []
+
+#     for i in range(gt_mask.size(0)):
+#         _, gt_height, gt_width = gt_mask[i].size()
+#         num_ones_pred_mask = torch.sum(pred_mask[i] == 1).item()
+#         num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
+
+#         if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
+#             pred_error_count = (num_ones_pred_mask - num_ones_gt_mask)
+#             error_ratio = pred_error_count / (gt_width * gt_height * 3)
+#             if pred_error_count >= 0 and error_ratio > ratio_threshold:
+#                 bool_correct_fc.append(0)
+#             else:
+#                 bool_correct_fc.append(1)
+
+#     return bool_correct_fc
+
+def prepare_gt_mask(ground_truths, batch_size, width, height, device):
     with torch.no_grad():
         ground_truth_mask = torch.zeros(batch_size, 3, width, height, device=device)
         for gt in ground_truths:
@@ -174,9 +196,10 @@ def prepare_gt_mask_and_inverted_mask(ground_truths, batch_size, width, height, 
                 y2 = min(height - 1, y2)
                 ground_truth_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 1
 
-        inverted_mask = 1 - ground_truth_mask
+        # inverted_mask = 1 - ground_truth_mask
 
-    return ground_truth_mask, inverted_mask
+    # return ground_truth_mask, inverted_mask
+    return ground_truth_mask
 
 
 # def prepare_batch_mask_tensor(tensor_indices, tensor_bbox, batch, image_width, image_height, device):
@@ -668,11 +691,13 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     # batch_inverted_masked_image=imgs*inverted_mask
                     # print(f"returned unique ===> {batch_mask.unique(return_counts=True)}")
                     std_pred,std_features = model(imgs,target=targets)
+                    
                     # std_pred_masked, std_features_masked= model(batch_masked_image, target=targets)  # forward
                     # std_pred_masked_inv, std_features_masked_inv= model(batch_inverted_masked_image, target=targets)  # forward
                     # bbox=compute_loss.get_gt_bbox(pred,targets)
                     
                     tech_pred,tech_features = teacher_model(imgs,target=targets)
+                    
                     # tech_pred_masked, tech_features_masked= teacher_model(batch_masked_image, target=targets)  # forward
                     # tech_pred_masked_inv, tech_features_masked_inv= teacher_model(batch_inverted_masked_image, target=targets)  # forward
 
@@ -682,7 +707,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     tensor_batch_index,tensor_bbox=get_teacher_model_label_bbox(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
                     pred_mask=prepare_batch_mask_tensor(tensor_batch_index, tensor_bbox, batch_size, img_w, img_h, device)
                     
-                    gt_mask,inv_gt_mask=prepare_gt_mask_and_inverted_mask(targets,batch_size,img_w,img_h,device)
+                    gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
                     
                     teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
                     # print(f"focused_feature_index ==> {teacher_focused_feature_index}")

@@ -225,84 +225,48 @@ class ComputeLoss:
         
         return lbox,lobj,lcls
             
-    def __call__(self,p,targets,student=None, teacher=None, teacher_accepted_batch=None):  # predictions, targets, model
+    # def __call__(self,p,targets,student=None, teacher=None, teacher_accepted_batch=None):  # predictions, targets, model
         
+    #     tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+        
+    #     ## teachers predictions
+        
+    #     # print(f"teacher batch ===> {len(teacher_accepted_batch[0])}")
+    #     lbox,lobj,lcls=self.get_lcls_lbox_lobj(p,tcls, tbox, indices, anchors)
+    #     roi_loss=torch.zeros(1, device=self.device)
+    #     distillation_factor=0.5
+    #     if(teacher_accepted_batch!=None):
+    #         for index,single_item in enumerate(teacher_accepted_batch):
+    #             if(single_item==1):
+    #                 roi_loss+=torch.tensor(feature_mse(student[index],teacher[index]))
+    #         roi_loss=roi_loss/sum(teacher_accepted_batch)
+    #         # roi_inv_loss=feature_mse(student_inv,teacher_inv)
+    #         # total_loss=foward_factor*roi_loss+backward_factor*roi_inv_loss
+    #     total_loss=distillation_factor*roi_loss+lbox+lobj+lcls
+    #     return total_loss, torch.cat((lbox, lobj, lcls)).detach()
+    
+    def __call__(self, p, targets, student=None, teacher=None, teacher_accepted_batch=None):  # predictions, targets, model
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+
+        # Get teacher's predictions
+        lbox, lobj, lcls = self.get_lcls_lbox_lobj(p, tcls, tbox, indices, anchors)
         
-        ## teachers predictions
-        
-        # print(f"teacher targets ===> {tcls}")
-        lbox,lobj,lcls=self.get_lcls_lbox_lobj(p,tcls, tbox, indices, anchors)
-        roi_loss=torch.zeros(1, device=self.device)
-        distillation_factor=0.5
-        if(teacher_accepted_batch!=None):
-            for index,single_item in enumerate(teacher_accepted_batch):
-                if(single_item==1):
-                    roi_loss+=torch.tensor(feature_mse(student[index],teacher[index]))
-            roi_loss=roi_loss/sum(teacher_accepted_batch)
-            # roi_inv_loss=feature_mse(student_inv,teacher_inv)
-            # total_loss=foward_factor*roi_loss+backward_factor*roi_inv_loss
-        total_loss=distillation_factor*roi_loss+lbox+lobj+lcls
+        roi_loss = torch.tensor(0.0, device=self.device)
+        distillation_factor = 0.5
+
+        if teacher_accepted_batch is not None:
+            teacher_accepted_batch_tensor = torch.tensor(teacher_accepted_batch, device=self.device)
+            selected_teacher_indices = torch.nonzero(teacher_accepted_batch_tensor).squeeze()
+
+            if selected_teacher_indices.numel() > 0:  # Check if selected indices tensor has elements
+                student_selected = torch.index_select(student, 0, selected_teacher_indices)
+                teacher_selected = torch.index_select(teacher, 0, selected_teacher_indices)
+                roi_loss = torch.tensor(feature_mse(student_selected, teacher_selected), device=self.device)
+                roi_loss = roi_loss.mean()
+
+        total_loss = distillation_factor * roi_loss + lbox + lobj + lcls
         return total_loss, torch.cat((lbox, lobj, lcls)).detach()
 
-    # def __call__(self, p, targets, teacher=None, student=None, mask=None):  # predictions, targets, model
-    #     lcls = torch.zeros(1, device=self.device)  # class loss
-    #     lbox = torch.zeros(1, device=self.device)  # box loss
-    #     lobj = torch.zeros(1, device=self.device)  # object loss
-    #     tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
-    #     # print(f"called_targets ===> {tbox}")
-    #     # print(f"called_anchors ===> {anchors}")
-    #     # Losses
-    #     for i, pi in enumerate(p):  # layer index, layer predictions
-    #         b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-    #         tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
-
-    #         n = b.shape[0]  # number of targets
-    #         if n:
-    #             # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
-    #             pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
-
-    #             # Regression
-    #             pxy = pxy.sigmoid() * 2 - 0.5
-    #             pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
-    #             pbox = torch.cat((pxy, pwh), 1)  # predicted box
-    #             iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
-    #             lbox += (1.0 - iou).mean()  # iou loss
-
-    #             # Objectness
-    #             iou = iou.detach().clamp(0).type(tobj.dtype)
-    #             if self.sort_obj_iou:
-    #                 j = iou.argsort()
-    #                 b, a, gj, gi, iou = b[j], a[j], gj[j], gi[j], iou[j]
-    #             if self.gr < 1:
-    #                 iou = (1.0 - self.gr) + self.gr * iou
-    #             tobj[b, a, gj, gi] = iou  # iou ratio
-
-    #             # Classification
-    #             if self.nc > 1:  # cls loss (only if multiple classes)
-    #                 t = torch.full_like(pcls, self.cn, device=self.device)  # targets
-    #                 t[range(n), tcls[i]] = self.cp
-    #                 lcls += self.BCEcls(pcls, t)  # BCE
-
-    #             # Append targets to text file
-    #             # with open('targets.txt', 'a') as file:
-    #             #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
-
-    #         obji = self.BCEobj(pi[..., 4], tobj)
-    #         lobj += obji * self.balance[i]  # obj loss
-    #         if self.autobalance:
-    #             self.balance[i] = self.balance[i] * 0.9999 + 0.0001 / obji.detach().item()
-
-    #     if self.autobalance:
-    #         self.balance = [x / self.balance[self.ssi] for x in self.balance]
-    #     lbox *= self.hyp['box']
-    #     lobj *= self.hyp['obj']
-    #     lcls *= self.hyp['cls']
-    #     bs = tobj.shape[0]  # batch size
-
-    #     lmask = imitation_loss(teacher, student, mask) * 0.01
-
-    #     return (lbox + lobj + lcls + lmask) * bs, torch.cat((lbox, lobj, lcls)).detach()
 
     def build_targets(self, p, targets):
         # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
