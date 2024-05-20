@@ -61,6 +61,7 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
 from utils.loss import ComputeLoss
+from utils.cbam import CBAM
 # from utils.computeloss import ComputeLoss as TeacherComputeLoss
 from utils.get_teacher_loss import get_teacher_model_label_bbox
 
@@ -627,8 +628,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         
         _, student_channel, student_out_size, _ = features.shape
         _, teacher_channel, teacher_out_size, _ = teacher_feature.shape
-        
-        stu_feature_adapt = nn.Sequential(nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
+        # stu_feature_adapt = nn.Sequential(nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
+        stu_feature_adapt = nn.Sequential(CBAM(student_channel,r=2),nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
                   
                 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
