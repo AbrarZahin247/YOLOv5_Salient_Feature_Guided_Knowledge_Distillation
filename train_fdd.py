@@ -60,10 +60,10 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
                            yaml_save)
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
-from utils.loss import ComputeLoss
-from utils.cbam import CBAM
+from utils.loss_fdd import ComputeLoss
+from utils.cbam import CBAM,CAM
 # from utils.computeloss import ComputeLoss as TeacherComputeLoss
-from utils.get_teacher_loss import get_teacher_model_label_bbox
+# from utils.get_teacher_loss import get_teacher_model_label_bbox
 
 
 from utils.metrics import fitness
@@ -687,44 +687,21 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 if opt.teacher_weight:
                     batch_size, _, img_w, img_h = imgs.size()
                     
-                    
-                    # batch_masked_image=imgs*batch_mask
-                    # batch_inverted_masked_image=imgs*inverted_mask
-                    # print(f"returned unique ===> {batch_mask.unique(return_counts=True)}")
-                    std_pred,std_features = model(imgs,target=targets)
-                    
-                    # std_pred_masked, std_features_masked= model(batch_masked_image, target=targets)  # forward
-                    # std_pred_masked_inv, std_features_masked_inv= model(batch_inverted_masked_image, target=targets)  # forward
-                    # bbox=compute_loss.get_gt_bbox(pred,targets)
-                    
-                    tech_pred,tech_features = teacher_model(imgs,target=targets)
-                    
-                    # tech_pred_masked, tech_features_masked= teacher_model(batch_masked_image, target=targets)  # forward
-                    # tech_pred_masked_inv, tech_features_masked_inv= teacher_model(batch_inverted_masked_image, target=targets)  # forward
-
-                    ## dataset,names,hyp,nc,device,weights,imgs,targets
-                    # mask_calc_device="cpu"
-                    
-                    tensor_batch_index,tensor_bbox=get_teacher_model_label_bbox(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
-                    pred_mask=prepare_batch_mask_tensor(tensor_batch_index, tensor_bbox, batch_size, img_w, img_h, device)
-                    
                     gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
+                    batch_masked_image=imgs*gt_mask
                     
-                    teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
-                    print(f"focused_feature_index ==> {teacher_focused_feature_index}")
+                    std_pred,std_features = model(imgs,target=targets)
+                    _, std_features_masked= model(batch_masked_image, target=targets)  # forward
+                    std_diff_feat=std_features-std_features_masked
+                    # print(f"student feature ==> {std_features.size()} {std_diff_feat.size()}")
                     
                     
+                    __,tech_features = teacher_model(imgs,target=targets)
+                    _, tech_features_masked= teacher_model(batch_masked_image, target=targets)  # forward
+                    tech_diff_feat=tech_features-tech_features_masked
                     
-                    
-                    # teacher_focused_feature_index=prepare_batch_mask_tensor(tensor_batch_index,tensor_bbox,batch_size,img_w, img_h,mask_calc_device)
-                    
-                    ## here all ways give full image for mask generation
-                    # batch_mask,inverted_mask=masked_img_and_inv_masked_img(targets,batch_size,img_w,img_h,mask_calc_device)
-                    # teacher_focused_feature_index=compare_two_mask(batch_mask,prediction_mask,mask_calc_device)
-                    # print(f"teacher_focused_feature_index ===> {teacher_focused_feature_index}")
-                    # print(f"teacher indices ===> {tech_indices}")
 
-                    loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(std_features), tech_features.detach(),teacher_focused_feature_index)  # loss scaled by batch_size
+                    loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(std_diff_feat), tech_diff_feat.detach())  # loss scaled by batch_size
                     
                 else:
                     pred = model(imgs)  # forward
