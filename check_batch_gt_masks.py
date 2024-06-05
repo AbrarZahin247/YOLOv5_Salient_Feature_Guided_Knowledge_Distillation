@@ -18,6 +18,7 @@ Tutorial:   https://docs.ultralytics.com/yolov5/tutorials/train_custom_data
 import argparse
 import math
 import os
+import cv2
 import random
 import subprocess
 import sys
@@ -201,6 +202,81 @@ def prepare_gt_mask(ground_truths, batch_size, width, height, device):
 
     # return ground_truth_mask, inverted_mask
     return ground_truth_mask
+def display_and_save_batched_images(batched_images, save_dir="saved_imgs", window_name="Combined Images",batch_size=12):
+    """
+    Displays and saves a batch of images in a grid layout.
+
+    Args:
+        batched_images (torch.Tensor): A tensor of shape (batch_size, channels, height, width) representing the batched images.
+        save_dir (str, optional): The directory to save the combined image. Defaults to "saved_imgs".
+        window_name (str, optional): The name of the window to display the combined image. Defaults to "Combined Images".
+    """
+
+    # Ensure the batch dimension is 12 (modify if needed)
+    
+    if batched_images.shape[0] != batch_size:
+        raise ValueError(f"Expected batch dimension to be {batch_size}, but got {batched_images.shape[0]}")
+
+    # Convert the batched images to NumPy arrays (assuming they are tensors)
+    images = batched_images.cpu().numpy()
+
+    # Get the number of rows and columns to arrange the images in a grid
+    num_rows, num_cols = calculate_grid_shape(len(images))
+
+    # Create a blank image to hold the combined images
+    row_height, col_width, channels = images[0].shape  # Assuming all images have the same shape
+    combined_image = np.zeros((row_height * num_rows, col_width * num_cols, channels), dtype=images.dtype)
+
+    # Loop through the images and place them in the combined image
+    for i, image in enumerate(images):
+        row, col = divmod(i, num_cols)
+        combined_image[row * row_height:(row + 1) * row_height, col * col_width:(col + 1) * col_width] = image
+
+    # Create the "saved_imgs" directory if it doesn't exist
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    # Save the combined image
+    save_path = os.path.join(save_dir, "combined_image.jpg")
+    cv2.imwrite(save_path, combined_image)
+
+    print("Combined image saved to:", save_path)
+
+    # Ensure combined_image has a supported data type (e.g., uint8)
+    if not combined_image.dtype == np.uint8:
+        combined_image = combined_image.astype(np.uint8)  # Convert if necessary
+
+    # Display the combined image in a window
+    cv2.imshow(window_name, combined_image)
+    cv2.waitKey(0)  # Wait for a key press to close the window
+
+def calculate_grid_shape(num_images):
+    """
+    Calculates the optimal grid shape for arranging a given number of images.
+
+    Args:
+        num_images (int): The number of images to arrange.
+
+    Returns:
+        tuple: A tuple (num_rows, num_cols) representing the optimal grid shape.
+    """
+
+    # Start with a square grid
+    sqrt_num_images = int(np.sqrt(num_images))
+    num_rows = num_cols = sqrt_num_images
+
+    # Adjust rows or columns if necessary to get a closer fit
+    while num_rows * num_cols < num_images:
+        if num_rows <= num_cols:
+            num_rows += 1
+        else:
+            num_cols += 1
+
+    return num_rows, num_cols
+      
+
+# Example usage (assuming your batched images are in a variable named 'batched_images')
+
 
 
 # def prepare_batch_mask_tensor(tensor_indices, tensor_bbox, batch, image_width, image_height, device):
@@ -687,8 +763,11 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 if opt.teacher_weight:
                     batch_size, _, img_w, img_h = imgs.size()
                     
-                    
-                    # batch_masked_image=imgs*batch_mask
+                    gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
+                    batch_masked_image=imgs*gt_mask
+                    display_and_save_batched_images(batch_masked_image,save_dir="main_images",batch_size=4)
+                    display_and_save_batched_images(batch_masked_image,batch_size=4)
+                    print(f"batch_masked_image size {batch_masked_image.size()}")
                     # batch_inverted_masked_image=imgs*inverted_mask
                     # print(f"returned unique ===> {batch_mask.unique(return_counts=True)}")
                     std_pred,std_features = model(imgs,target=targets)
@@ -708,7 +787,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     tensor_batch_index,tensor_bbox=get_teacher_model_label_bbox(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
                     pred_mask=prepare_batch_mask_tensor(tensor_batch_index, tensor_bbox, batch_size, img_w, img_h, device)
                     
-                    gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
+                    
                     
                     teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
                     # print(f"focused_feature_index ==> {teacher_focused_feature_index}")
