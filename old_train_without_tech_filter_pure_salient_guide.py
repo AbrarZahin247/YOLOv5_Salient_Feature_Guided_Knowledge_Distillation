@@ -18,7 +18,6 @@ Tutorial:   https://docs.ultralytics.com/yolov5/tutorials/train_custom_data
 import argparse
 import math
 import os
-import cv2
 import random
 import subprocess
 import sys
@@ -61,10 +60,12 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
                            yaml_save)
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
-from utils.loss import ComputeLoss
+# from utils.loss import ComputeLoss
+from utils.loss_without_tf import ComputeLoss
 from utils.cbam import CBAM
 # from utils.computeloss import ComputeLoss as TeacherComputeLoss
-from utils.get_teacher_loss import get_teacher_model_label_bbox
+# from utils.get_teacher_loss import get_teacher_model_label_bbox
+from utils.single_teacher_loss import single_teacher_loss
 
 
 from utils.metrics import fitness
@@ -202,158 +203,6 @@ def prepare_gt_mask(ground_truths, batch_size, width, height, device):
 
     # return ground_truth_mask, inverted_mask
     return ground_truth_mask
-
-def add_padding(original_image, padding_size=10):
-    """
-    Add padding to the original image.
-
-    Parameters:
-        original_image (ndarray): The original image array with shape (3, height, width).
-        padding_size (int): The size of the padding in pixels. Default is 10.
-
-    Returns:
-        ndarray: The padded image array with shape (3, height + 2 * padding_size, width + 2 * padding_size).
-    """
-    # Get the dimensions of the original image
-    original_height, original_width = original_image.shape[1], original_image.shape[2]
-
-    # Create a new array for the padded image
-    padded_image = np.zeros((3, original_height + 2 * padding_size, original_width + 2 * padding_size), dtype=np.uint8)
-
-    # Fill the padded region with white pixels
-    padded_image[:, padding_size:-padding_size, padding_size:-padding_size] = 255
-
-    # Assign the original image to the center of the padded image
-    padded_image[:, padding_size:padding_size + original_height, padding_size:padding_size + original_width] = original_image
-
-    return padded_image
-
-def convert_normalized_tensor_to_cv2image(batch_tensor_array):
-    batch_images = batch_tensor_array.cpu().numpy()
-    numpy_img=np.zeros((3, 640, 640), dtype=np.uint8)
-    # red_color_border = np.zeros((3,640, 20), dtype=np.uint8)
-    # red_color_border[2, :, :] = 255
-    
-    for i,single_image in enumerate(batch_images):
-        if single_image.dtype != np.uint8:
-            single_image = (single_image * 255).astype(np.uint8)
-            padding_size = 10
-            padded_image=add_padding(single_image,padding_size)
-            
-        if single_image.shape[0] == 3:  # Assuming shape is (3, height, width)
-            single_image = np.transpose(padded_image, (1, 2, 0))
-        if(i==0):
-            numpy_img=single_image
-        else:
-            # pass
-            numpy_img=np.vstack((numpy_img,single_image))
-            
-            # stacked_array = np.array([numpy_img,single_image, red_color_border])
-            # numpy_img=np.vstack(stacked_array)
-            # numpy_img=np.vstack((numpy_img,red_color_border))
-            
-
-# Set the red channel to its maximum intensity (255)
-
-    return numpy_img
-            
-    
-    
-def display_and_save_batched_images(batched_images,main_imgs,save_dir="saved_imgs", window_name="Combined Images",batch_size=12):
-    """
-    Displays and saves a batch of images in a grid layout.
-
-    Args:
-        batched_images (torch.Tensor): A tensor of shape (batch_size, channels, height, width) representing the batched images.
-        save_dir (str, optional): The directory to save the combined image. Defaults to "saved_imgs".
-        window_name (str, optional): The name of the window to display the combined image. Defaults to "Combined Images".
-    """
-
-    # Ensure the batch dimension is 12 (modify if needed)
-    print("batch size is {}".format(batched_images.shape))
-    if batched_images.shape[0] != batch_size:
-        raise ValueError(f"Expected batch dimension to be {batch_size}, but got {batched_images.shape[0]}")
-    batched_images_stacked=convert_normalized_tensor_to_cv2image(batched_images)
-    full_images_stacked=convert_normalized_tensor_to_cv2image(main_imgs)
-    packed_images = np.hstack((full_images_stacked,batched_images_stacked))
-    # Check if the directory already exists
-    generate_randomnum=True
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    # else:
-    #     #save directory exist so create a new directory
-    #     # Generate a random number between 1 and 10000
-    #     random_number = random.randint(1, 10000)
-    #     save_dir = f"{save_dir}_{random_number}"
-    #     if not os.path.exists(save_dir):
-    #         os.makedirs(save_dir)
-    # Save the combined image
-    random_string = ''.join(np.random.choice(list('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'), size=10))
-    # Combine the random string with the file extension
-    image_name = random_string + ".jpg"
-    # Combine the save directory and the image name to create the full save path
-    save_path = os.path.join(save_dir, image_name)
-    cv2.imwrite(save_path, packed_images)
-    # cv2.imshow(window_name, packed_images)
-    # cv2.waitKey(0)
-
-    # Get the number of rows and columns to arrange the images in a grid
-    # num_rows, num_cols = calculate_grid_shape(len(images))
-
-    # # Create a blank image to hold the combined images
-    # row_height, col_width, channels = images[0].shape  # Assuming all images have the same shape
-    # combined_image = np.zeros((row_height * num_rows, col_width * num_cols, channels), dtype=images.dtype)
-
-    # # Loop through the images and place them in the combined image
-    # for i, image in enumerate(images):
-    #     row, col = divmod(i, num_cols)
-    #     combined_image[row * row_height:(row + 1) * row_height, col * col_width:(col + 1) * col_width] = image
-
-    # # Create the "saved_imgs" directory if it doesn't exist
-    # if not os.path.exists(save_dir):
-    #     os.makedirs(save_dir)
-
-    # # Save the combined image
-    # save_path = os.path.join(save_dir, "combined_image.jpg")
-    # cv2.imwrite(save_path, combined_image)
-
-    # print("Combined image saved to:", save_path)
-
-    # # Ensure combined_image has a supported data type (e.g., uint8)
-    # if not combined_image.dtype == np.uint8:
-    #     combined_image = combined_image.astype(np.uint8)  # Convert if necessary
-
-    # # Display the combined image in a window
-    # cv2.imshow(window_name, combined_image)
-    # cv2.waitKey(0)  # Wait for a key press to close the window
-
-def calculate_grid_shape(num_images):
-    """
-    Calculates the optimal grid shape for arranging a given number of images.
-
-    Args:
-        num_images (int): The number of images to arrange.
-
-    Returns:
-        tuple: A tuple (num_rows, num_cols) representing the optimal grid shape.
-    """
-
-    # Start with a square grid
-    sqrt_num_images = int(np.sqrt(num_images))
-    num_rows = num_cols = sqrt_num_images
-
-    # Adjust rows or columns if necessary to get a closer fit
-    while num_rows * num_cols < num_images:
-        if num_rows <= num_cols:
-            num_rows += 1
-        else:
-            num_cols += 1
-
-    return num_rows, num_cols
-      
-
-# Example usage (assuming your batched images are in a variable named 'batched_images')
-
 
 
 # def prepare_batch_mask_tensor(tensor_indices, tensor_bbox, batch, image_width, image_height, device):
@@ -813,206 +662,185 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             callbacks.run('on_train_batch_start')
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
-            batch,channel,img_w,img_h=imgs.shape
-            gt_mask=prepare_gt_mask(targets,batch,img_w,img_h,device)
-            batch_masked_image=imgs*gt_mask
-            display_and_save_batched_images(batch_masked_image,imgs,save_dir="main_images",batch_size=4)
 
-        #     # Warmup
-        #     if ni <= nw:
-        #         xi = [0, nw]  # x interp
-        #         # compute_loss.gr = np.interp(ni, xi, [0.0, 1.0])  # iou loss ratio (obj_loss = 1.0 or iou)
-        #         accumulate = max(1, np.interp(ni, xi, [1, nbs / batch_size]).round())
-        #         for j, x in enumerate(optimizer.param_groups):
-        #             # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
-        #             x['lr'] = np.interp(ni, xi, [hyp['warmup_bias_lr'] if j == 0 else 0.0, x['initial_lr'] * lf(epoch)])
-        #             if 'momentum' in x:
-        #                 x['momentum'] = np.interp(ni, xi, [hyp['warmup_momentum'], hyp['momentum']])
+            # Warmup
+            if ni <= nw:
+                xi = [0, nw]  # x interp
+                # compute_loss.gr = np.interp(ni, xi, [0.0, 1.0])  # iou loss ratio (obj_loss = 1.0 or iou)
+                accumulate = max(1, np.interp(ni, xi, [1, nbs / batch_size]).round())
+                for j, x in enumerate(optimizer.param_groups):
+                    # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
+                    x['lr'] = np.interp(ni, xi, [hyp['warmup_bias_lr'] if j == 0 else 0.0, x['initial_lr'] * lf(epoch)])
+                    if 'momentum' in x:
+                        x['momentum'] = np.interp(ni, xi, [hyp['warmup_momentum'], hyp['momentum']])
 
-        #     # Multi-scale
-        #     if opt.multi_scale:
-        #         sz = random.randrange(int(imgsz * 0.5), int(imgsz * 1.5) + gs) // gs * gs  # size
-        #         sf = sz / max(imgs.shape[2:])  # scale factor
-        #         if sf != 1:
-        #             ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]  # new shape (stretched to gs-multiple)
-        #             imgs = nn.functional.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
+            # Multi-scale
+            if opt.multi_scale:
+                sz = random.randrange(int(imgsz * 0.5), int(imgsz * 1.5) + gs) // gs * gs  # size
+                sf = sz / max(imgs.shape[2:])  # scale factor
+                if sf != 1:
+                    ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]  # new shape (stretched to gs-multiple)
+                    imgs = nn.functional.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
 
-        #     # Forward
+            # Forward
 
-        #     with torch.cuda.amp.autocast(amp):
-        #         targets = targets.to(device)
-        #         if opt.teacher_weight:
-        #             batch_size, _, img_w, img_h = imgs.size()
+            with torch.cuda.amp.autocast(amp):
+                targets = targets.to(device)
+                if opt.teacher_weight:
+                    batch_size, _, img_w, img_h = imgs.size()
                     
-        #             gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
-        #             batch_masked_image=imgs*gt_mask
-        #             display_and_save_batched_images(batch_masked_image,save_dir="main_images",batch_size=4)
-        #             display_and_save_batched_images(batch_masked_image,batch_size=4)
-        #             print(f"batch_masked_image size {batch_masked_image.size()}")
-        #             # batch_inverted_masked_image=imgs*inverted_mask
-        #             # print(f"returned unique ===> {batch_mask.unique(return_counts=True)}")
-        #             std_pred,std_features = model(imgs,target=targets)
+                    gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
+                    inv_mask=1-gt_mask
+                    batch_background=imgs*inv_mask
+                    # batch_inverted_masked_image=imgs*inverted_mask
+                    # print(f"returned unique ===> {batch_mask.unique(return_counts=True)}")
+                    std_pred,std_features = model(imgs,target=targets)
+                    std_pred_background, std_features_background= model(batch_background, target=targets)  # forward
+                    sgm_std_feature=std_features-std_features_background
                     
-        #             # std_pred_masked, std_features_masked= model(batch_masked_image, target=targets)  # forward
-        #             # std_pred_masked_inv, std_features_masked_inv= model(batch_inverted_masked_image, target=targets)  # forward
-        #             # bbox=compute_loss.get_gt_bbox(pred,targets)
                     
-        #             tech_pred,tech_features = teacher_model(imgs,target=targets)
-                    
-        #             # tech_pred_masked, tech_features_masked= teacher_model(batch_masked_image, target=targets)  # forward
-        #             # tech_pred_masked_inv, tech_features_masked_inv= teacher_model(batch_inverted_masked_image, target=targets)  # forward
-
-        #             ## dataset,names,hyp,nc,device,weights,imgs,targets
-        #             # mask_calc_device="cpu"
-                    
-        #             tensor_batch_index,tensor_bbox=get_teacher_model_label_bbox(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
-        #             pred_mask=prepare_batch_mask_tensor(tensor_batch_index, tensor_bbox, batch_size, img_w, img_h, device)
+                    tech_pred,tech_features = teacher_model(imgs,target=targets)
+                    tech_pred_masked, tech_features_background= teacher_model(batch_background, target=targets)  # forward
+                    sgm_tech_feature=tech_features-tech_features_background
+                   
+                    # teacher_loss,teacher_loss_items=single_teacher_loss(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
+                    # print(teacher_loss)
+                    # tensor_batch_index,tensor_bbox=get_teacher_model_label_bbox(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
+                    # pred_mask=prepare_batch_mask_tensor(tensor_batch_index, tensor_bbox, batch_size, img_w, img_h, device)
                     
                     
                     
-        #             teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
-        #             # print(f"focused_feature_index ==> {teacher_focused_feature_index}")
+                    # teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
                     
+
+                    loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(sgm_std_feature), sgm_tech_feature.detach())  # loss scaled by batch_size
                     
-                    
-                    
-        #             # teacher_focused_feature_index=prepare_batch_mask_tensor(tensor_batch_index,tensor_bbox,batch_size,img_w, img_h,mask_calc_device)
-                    
-        #             ## here all ways give full image for mask generation
-        #             # batch_mask,inverted_mask=masked_img_and_inv_masked_img(targets,batch_size,img_w,img_h,mask_calc_device)
-        #             # teacher_focused_feature_index=compare_two_mask(batch_mask,prediction_mask,mask_calc_device)
-        #             # print(f"teacher_focused_feature_index ===> {teacher_focused_feature_index}")
-        #             # print(f"teacher indices ===> {tech_indices}")
+                else:
+                    pred = model(imgs)  # forward
+                    loss, loss_items = compute_loss(pred, targets)  # loss scaled by batch_size
 
-        #             loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(std_features), tech_features.detach(),teacher_focused_feature_index)  # loss scaled by batch_size
-                    
-        #         else:
-        #             pred = model(imgs)  # forward
-        #             loss, loss_items = compute_loss(pred, targets)  # loss scaled by batch_size
+                if RANK != -1:
+                    loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
+                if opt.quad:
+                    loss *= 4.
 
-        #         if RANK != -1:
-        #             loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
-        #         if opt.quad:
-        #             loss *= 4.
+            # Backward
+            scaler.scale(loss).backward()
 
-        #     # Backward
-        #     # scaler.scale(loss).backward()
+            # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
+            if ni - last_opt_step >= accumulate:
+                scaler.unscale_(optimizer)  # unscale gradients
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
+                scaler.step(optimizer)  # optimizer.step
+                scaler.update()
+                optimizer.zero_grad()
+                if ema:
+                    ema.update(model)
+                last_opt_step = ni
 
-        #     # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
-        #     if ni - last_opt_step >= accumulate:
-        #         scaler.unscale_(optimizer)  # unscale gradients
-        #         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
-        #         scaler.step(optimizer)  # optimizer.step
-        #         scaler.update()
-        #         optimizer.zero_grad()
-        #         if ema:
-        #             ema.update(model)
-        #         last_opt_step = ni
+            # Log
+            if RANK in {-1, 0}:
+                mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
+                mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G'  # (GB)
+                pbar.set_description(('%11s' * 2 + '%11.4g' * 5) %
+                                     (f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1]))
+                callbacks.run('on_train_batch_end', model, ni, imgs, targets, paths, list(mloss))
+                if callbacks.stop_training:
+                    return
+            # end batch ------------------------------------------------------------------------------------------------
 
-        #     # Log
-        #     if RANK in {-1, 0}:
-        #         mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
-        #         mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G'  # (GB)
-        #         pbar.set_description(('%11s' * 2 + '%11.4g' * 5) %
-        #                              (f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1]))
-        #         callbacks.run('on_train_batch_end', model, ni, imgs, targets, paths, list(mloss))
-        #         if callbacks.stop_training:
-        #             return
-        #     # end batch ------------------------------------------------------------------------------------------------
+        # Scheduler
+        lr = [x['lr'] for x in optimizer.param_groups]  # for loggers
+        scheduler.step()
 
-        # # Scheduler
-        # lr = [x['lr'] for x in optimizer.param_groups]  # for loggers
-        # scheduler.step()
+        if RANK in {-1, 0}:
+            # mAP
+            callbacks.run('on_train_epoch_end', epoch=epoch)
+            ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
+            final_epoch = (epoch + 1 == epochs) or stopper.possible_stop
+            if not noval or final_epoch:  # Calculate mAP
+                results, maps, _ = validate.run(data_dict,
+                                                batch_size=batch_size // WORLD_SIZE * 2,
+                                                imgsz=imgsz,
+                                                half=amp,
+                                                model=ema.ema,
+                                                single_cls=single_cls,
+                                                dataloader=val_loader,
+                                                save_dir=save_dir,
+                                                plots=False,
+                                                callbacks=callbacks,
+                                                compute_loss=compute_loss)
 
-        # if RANK in {-1, 0}:
-        #     # mAP
-        #     callbacks.run('on_train_epoch_end', epoch=epoch)
-        #     ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
-        #     final_epoch = (epoch + 1 == epochs) or stopper.possible_stop
-        #     if not noval or final_epoch:  # Calculate mAP
-        #         results, maps, _ = validate.run(data_dict,
-        #                                         batch_size=batch_size // WORLD_SIZE * 2,
-        #                                         imgsz=imgsz,
-        #                                         half=amp,
-        #                                         model=ema.ema,
-        #                                         single_cls=single_cls,
-        #                                         dataloader=val_loader,
-        #                                         save_dir=save_dir,
-        #                                         plots=False,
-        #                                         callbacks=callbacks,
-        #                                         compute_loss=compute_loss)
+            # Update best mAP
+            fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+            stop = stopper(epoch=epoch, fitness=fi)  # early stop check
+            if fi > best_fitness:
+                best_fitness = fi
+            log_vals = list(mloss) + list(results) + lr
+            callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)
 
-        #     # Update best mAP
-        #     fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
-        #     stop = stopper(epoch=epoch, fitness=fi)  # early stop check
-        #     if fi > best_fitness:
-        #         best_fitness = fi
-        #     log_vals = list(mloss) + list(results) + lr
-        #     callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)
-
-        #     # Save model
-        #     if (not nosave) or (final_epoch and not evolve):  # if save
-        #         ckpt = {
-        #             'epoch': epoch,
-        #             'best_fitness': best_fitness,
-        #             'model': deepcopy(de_parallel(model)).half(),
-        #             'ema': deepcopy(ema.ema).half(),
-        #             'updates': ema.updates,
-        #             'optimizer': optimizer.state_dict(),
-        #             'opt': vars(opt),
-        #             'git': GIT_INFO,  # {remote, branch, commit} if a git repo
-        #             'date': datetime.now().isoformat()}
+            # Save model
+            if (not nosave) or (final_epoch and not evolve):  # if save
+                ckpt = {
+                    'epoch': epoch,
+                    'best_fitness': best_fitness,
+                    'model': deepcopy(de_parallel(model)).half(),
+                    'ema': deepcopy(ema.ema).half(),
+                    'updates': ema.updates,
+                    'optimizer': optimizer.state_dict(),
+                    'opt': vars(opt),
+                    'git': GIT_INFO,  # {remote, branch, commit} if a git repo
+                    'date': datetime.now().isoformat()}
 
 
-        #         # Save last, best and delete
+                # Save last, best and delete
                 
-        #         torch.save(ckpt, last)
-        #         if best_fitness == fi:
-        #             torch.save(ckpt, best)
+                torch.save(ckpt, last)
+                if best_fitness == fi:
+                    torch.save(ckpt, best)
 
-        #         del ckpt
-        #         callbacks.run('on_model_save', last, epoch, final_epoch, best_fitness, fi)
+                del ckpt
+                callbacks.run('on_model_save', last, epoch, final_epoch, best_fitness, fi)
 
-        # # EarlyStopping
-        # if RANK != -1:  # if DDP training
-        #     broadcast_list = [stop if RANK == 0 else None]
-        #     dist.broadcast_object_list(broadcast_list, 0)  # broadcast 'stop' to all ranks
-        #     if RANK != 0:
-        #         stop = broadcast_list[0]
-        # if stop:
-        #     break  # must break all DDP ranks
+        # EarlyStopping
+        if RANK != -1:  # if DDP training
+            broadcast_list = [stop if RANK == 0 else None]
+            dist.broadcast_object_list(broadcast_list, 0)  # broadcast 'stop' to all ranks
+            if RANK != 0:
+                stop = broadcast_list[0]
+        if stop:
+            break  # must break all DDP ranks
 
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training -----------------------------------------------------------------------------------------------------
-    # if RANK in {-1, 0}:
-    #     LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
-    #     for f in last, best:
-    #         if f.exists():
-    #             strip_optimizer(f)  # strip optimizers
-    #             if f is best:
-    #                 LOGGER.info(f'\nValidating {f}...')
-    #                 results, _, _ = validate.run(
-    #                     data_dict,
-    #                     batch_size=batch_size // WORLD_SIZE * 2,
-    #                     imgsz=imgsz,
-    #                     model=attempt_load(f, device).half(),
-    #                     iou_thres=0.65 if is_coco else 0.60,  # best pycocotools at iou 0.65
-    #                     single_cls=single_cls,
-    #                     dataloader=val_loader,
-    #                     save_dir=save_dir,
-    #                     save_json=is_coco,
-    #                     verbose=True,
-    #                     plots=plots,
-    #                     callbacks=callbacks,
-    #                     compute_loss=compute_loss)  # val best model with plots
-    #                 if is_coco:
-    #                     callbacks.run('on_fit_epoch_end', list(mloss) + list(results) + lr, epoch, best_fitness, fi)
+    if RANK in {-1, 0}:
+        LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
+        for f in last, best:
+            if f.exists():
+                strip_optimizer(f)  # strip optimizers
+                if f is best:
+                    LOGGER.info(f'\nValidating {f}...')
+                    results, _, _ = validate.run(
+                        data_dict,
+                        batch_size=batch_size // WORLD_SIZE * 2,
+                        imgsz=imgsz,
+                        model=attempt_load(f, device).half(),
+                        iou_thres=0.65 if is_coco else 0.60,  # best pycocotools at iou 0.65
+                        single_cls=single_cls,
+                        dataloader=val_loader,
+                        save_dir=save_dir,
+                        save_json=is_coco,
+                        verbose=True,
+                        plots=plots,
+                        callbacks=callbacks,
+                        compute_loss=compute_loss)  # val best model with plots
+                    if is_coco:
+                        callbacks.run('on_fit_epoch_end', list(mloss) + list(results) + lr, epoch, best_fitness, fi)
 
-    #     callbacks.run('on_train_end', last, best, epoch, results)
+        callbacks.run('on_train_end', last, best, epoch, results)
 
     torch.cuda.empty_cache()
-    return None
-    
+    return results
 
 
 def parse_opt(known=False):
@@ -1113,101 +941,101 @@ def main(opt, callbacks=Callbacks()):
         train(opt.hyp, opt, device, callbacks)
 
     # Evolve hyperparameters (optional)
-    # else:
-    #     # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
-    #     meta = {
-    #         'lr0': (1, 1e-5, 1e-1),  # initial learning rate (SGD=1E-2, Adam=1E-3)
-    #         'lrf': (1, 0.01, 1.0),  # final OneCycleLR learning rate (lr0 * lrf)
-    #         'momentum': (0.3, 0.6, 0.98),  # SGD momentum/Adam beta1
-    #         'weight_decay': (1, 0.0, 0.001),  # optimizer weight decay
-    #         'warmup_epochs': (1, 0.0, 5.0),  # warmup epochs (fractions ok)
-    #         'warmup_momentum': (1, 0.0, 0.95),  # warmup initial momentum
-    #         'warmup_bias_lr': (1, 0.0, 0.2),  # warmup initial bias lr
-    #         'box': (1, 0.02, 0.2),  # box loss gain
-    #         'cls': (1, 0.2, 4.0),  # cls loss gain
-    #         'cls_pw': (1, 0.5, 2.0),  # cls BCELoss positive_weight
-    #         'obj': (1, 0.2, 4.0),  # obj loss gain (scale with pixels)
-    #         'obj_pw': (1, 0.5, 2.0),  # obj BCELoss positive_weight
-    #         'iou_t': (0, 0.1, 0.7),  # IoU training threshold
-    #         'anchor_t': (1, 2.0, 8.0),  # anchor-multiple threshold
-    #         'anchors': (2, 2.0, 10.0),  # anchors per output grid (0 to ignore)
-    #         'fl_gamma': (0, 0.0, 2.0),  # focal loss gamma (efficientDet default gamma=1.5)
-    #         'hsv_h': (1, 0.0, 0.1),  # image HSV-Hue augmentation (fraction)
-    #         'hsv_s': (1, 0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
-    #         'hsv_v': (1, 0.0, 0.9),  # image HSV-Value augmentation (fraction)
-    #         'degrees': (1, 0.0, 45.0),  # image rotation (+/- deg)
-    #         'translate': (1, 0.0, 0.9),  # image translation (+/- fraction)
-    #         'scale': (1, 0.0, 0.9),  # image scale (+/- gain)
-    #         'shear': (1, 0.0, 10.0),  # image shear (+/- deg)
-    #         'perspective': (0, 0.0, 0.001),  # image perspective (+/- fraction), range 0-0.001
-    #         'flipud': (1, 0.0, 1.0),  # image flip up-down (probability)
-    #         'fliplr': (0, 0.0, 1.0),  # image flip left-right (probability)
-    #         'mosaic': (1, 0.0, 1.0),  # image mixup (probability)
-    #         'mixup': (1, 0.0, 1.0),  # image mixup (probability)
-    #         'copy_paste': (1, 0.0, 1.0)}  # segment copy-paste (probability)
+    else:
+        # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
+        meta = {
+            'lr0': (1, 1e-5, 1e-1),  # initial learning rate (SGD=1E-2, Adam=1E-3)
+            'lrf': (1, 0.01, 1.0),  # final OneCycleLR learning rate (lr0 * lrf)
+            'momentum': (0.3, 0.6, 0.98),  # SGD momentum/Adam beta1
+            'weight_decay': (1, 0.0, 0.001),  # optimizer weight decay
+            'warmup_epochs': (1, 0.0, 5.0),  # warmup epochs (fractions ok)
+            'warmup_momentum': (1, 0.0, 0.95),  # warmup initial momentum
+            'warmup_bias_lr': (1, 0.0, 0.2),  # warmup initial bias lr
+            'box': (1, 0.02, 0.2),  # box loss gain
+            'cls': (1, 0.2, 4.0),  # cls loss gain
+            'cls_pw': (1, 0.5, 2.0),  # cls BCELoss positive_weight
+            'obj': (1, 0.2, 4.0),  # obj loss gain (scale with pixels)
+            'obj_pw': (1, 0.5, 2.0),  # obj BCELoss positive_weight
+            'iou_t': (0, 0.1, 0.7),  # IoU training threshold
+            'anchor_t': (1, 2.0, 8.0),  # anchor-multiple threshold
+            'anchors': (2, 2.0, 10.0),  # anchors per output grid (0 to ignore)
+            'fl_gamma': (0, 0.0, 2.0),  # focal loss gamma (efficientDet default gamma=1.5)
+            'hsv_h': (1, 0.0, 0.1),  # image HSV-Hue augmentation (fraction)
+            'hsv_s': (1, 0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
+            'hsv_v': (1, 0.0, 0.9),  # image HSV-Value augmentation (fraction)
+            'degrees': (1, 0.0, 45.0),  # image rotation (+/- deg)
+            'translate': (1, 0.0, 0.9),  # image translation (+/- fraction)
+            'scale': (1, 0.0, 0.9),  # image scale (+/- gain)
+            'shear': (1, 0.0, 10.0),  # image shear (+/- deg)
+            'perspective': (0, 0.0, 0.001),  # image perspective (+/- fraction), range 0-0.001
+            'flipud': (1, 0.0, 1.0),  # image flip up-down (probability)
+            'fliplr': (0, 0.0, 1.0),  # image flip left-right (probability)
+            'mosaic': (1, 0.0, 1.0),  # image mixup (probability)
+            'mixup': (1, 0.0, 1.0),  # image mixup (probability)
+            'copy_paste': (1, 0.0, 1.0)}  # segment copy-paste (probability)
 
-    #     with open(opt.hyp) as f:
-    #         hyp = yaml.safe_load(f)  # load hyps dict
-    #         if 'anchors' not in hyp:  # anchors commented in hyp.yaml
-    #             hyp['anchors'] = 3
-    #     if opt.noautoanchor:
-    #         del hyp['anchors'], meta['anchors']
-    #     opt.noval, opt.nosave, save_dir = True, True, Path(opt.save_dir)  # only val/save final epoch
-    #     # ei = [isinstance(x, (int, float)) for x in hyp.values()]  # evolvable indices
-    #     evolve_yaml, evolve_csv = save_dir / 'hyp_evolve.yaml', save_dir / 'evolve.csv'
-    #     if opt.bucket:
-    #         # download evolve.csv if exists
-    #         subprocess.run([
-    #             'gsutil',
-    #             'cp',
-    #             f'gs://{opt.bucket}/evolve.csv',
-    #             str(evolve_csv), ])
+        with open(opt.hyp) as f:
+            hyp = yaml.safe_load(f)  # load hyps dict
+            if 'anchors' not in hyp:  # anchors commented in hyp.yaml
+                hyp['anchors'] = 3
+        if opt.noautoanchor:
+            del hyp['anchors'], meta['anchors']
+        opt.noval, opt.nosave, save_dir = True, True, Path(opt.save_dir)  # only val/save final epoch
+        # ei = [isinstance(x, (int, float)) for x in hyp.values()]  # evolvable indices
+        evolve_yaml, evolve_csv = save_dir / 'hyp_evolve.yaml', save_dir / 'evolve.csv'
+        if opt.bucket:
+            # download evolve.csv if exists
+            subprocess.run([
+                'gsutil',
+                'cp',
+                f'gs://{opt.bucket}/evolve.csv',
+                str(evolve_csv), ])
 
-    #     for _ in range(opt.evolve):  # generations to evolve
-    #         if evolve_csv.exists():  # if evolve.csv exists: select best hyps and mutate
-    #             # Select parent(s)
-    #             parent = 'single'  # parent selection method: 'single' or 'weighted'
-    #             x = np.loadtxt(evolve_csv, ndmin=2, delimiter=',', skiprows=1)
-    #             n = min(5, len(x))  # number of previous results to consider
-    #             x = x[np.argsort(-fitness(x))][:n]  # top n mutations
-    #             w = fitness(x) - fitness(x).min() + 1E-6  # weights (sum > 0)
-    #             if parent == 'single' or len(x) == 1:
-    #                 # x = x[random.randint(0, n - 1)]  # random selection
-    #                 x = x[random.choices(range(n), weights=w)[0]]  # weighted selection
-    #             elif parent == 'weighted':
-    #                 x = (x * w.reshape(n, 1)).sum(0) / w.sum()  # weighted combination
+        for _ in range(opt.evolve):  # generations to evolve
+            if evolve_csv.exists():  # if evolve.csv exists: select best hyps and mutate
+                # Select parent(s)
+                parent = 'single'  # parent selection method: 'single' or 'weighted'
+                x = np.loadtxt(evolve_csv, ndmin=2, delimiter=',', skiprows=1)
+                n = min(5, len(x))  # number of previous results to consider
+                x = x[np.argsort(-fitness(x))][:n]  # top n mutations
+                w = fitness(x) - fitness(x).min() + 1E-6  # weights (sum > 0)
+                if parent == 'single' or len(x) == 1:
+                    # x = x[random.randint(0, n - 1)]  # random selection
+                    x = x[random.choices(range(n), weights=w)[0]]  # weighted selection
+                elif parent == 'weighted':
+                    x = (x * w.reshape(n, 1)).sum(0) / w.sum()  # weighted combination
 
-    #             # Mutate
-    #             mp, s = 0.8, 0.2  # mutation probability, sigma
-    #             npr = np.random
-    #             npr.seed(int(time.time()))
-    #             g = np.array([meta[k][0] for k in hyp.keys()])  # gains 0-1
-    #             ng = len(meta)
-    #             v = np.ones(ng)
-    #             while all(v == 1):  # mutate until a change occurs (prevent duplicates)
-    #                 v = (g * (npr.random(ng) < mp) * npr.randn(ng) * npr.random() * s + 1).clip(0.3, 3.0)
-    #             for i, k in enumerate(hyp.keys()):  # plt.hist(v.ravel(), 300)
-    #                 hyp[k] = float(x[i + 7] * v[i])  # mutate
+                # Mutate
+                mp, s = 0.8, 0.2  # mutation probability, sigma
+                npr = np.random
+                npr.seed(int(time.time()))
+                g = np.array([meta[k][0] for k in hyp.keys()])  # gains 0-1
+                ng = len(meta)
+                v = np.ones(ng)
+                while all(v == 1):  # mutate until a change occurs (prevent duplicates)
+                    v = (g * (npr.random(ng) < mp) * npr.randn(ng) * npr.random() * s + 1).clip(0.3, 3.0)
+                for i, k in enumerate(hyp.keys()):  # plt.hist(v.ravel(), 300)
+                    hyp[k] = float(x[i + 7] * v[i])  # mutate
 
-    #         # Constrain to limits
-    #         for k, v in meta.items():
-    #             hyp[k] = max(hyp[k], v[1])  # lower limit
-    #             hyp[k] = min(hyp[k], v[2])  # upper limit
-    #             hyp[k] = round(hyp[k], 5)  # significant digits
+            # Constrain to limits
+            for k, v in meta.items():
+                hyp[k] = max(hyp[k], v[1])  # lower limit
+                hyp[k] = min(hyp[k], v[2])  # upper limit
+                hyp[k] = round(hyp[k], 5)  # significant digits
 
-    #         # Train mutation
-    #         results = train(hyp.copy(), opt, device, callbacks)
-    #         callbacks = Callbacks()
-    #         # Write mutation results
-    #         keys = ('metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95', 'val/box_loss',
-    #                 'val/obj_loss', 'val/cls_loss')
-    #         print_mutation(keys, results, hyp.copy(), save_dir, opt.bucket)
+            # Train mutation
+            results = train(hyp.copy(), opt, device, callbacks)
+            callbacks = Callbacks()
+            # Write mutation results
+            keys = ('metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95', 'val/box_loss',
+                    'val/obj_loss', 'val/cls_loss')
+            print_mutation(keys, results, hyp.copy(), save_dir, opt.bucket)
 
-    #     # Plot results
-    #     plot_evolve(evolve_csv)
-    #     LOGGER.info(f'Hyperparameter evolution finished {opt.evolve} generations\n'
-    #                 f"Results saved to {colorstr('bold', save_dir)}\n"
-    #                 f'Usage example: $ python train.py --hyp {evolve_yaml}')
+        # Plot results
+        plot_evolve(evolve_csv)
+        LOGGER.info(f'Hyperparameter evolution finished {opt.evolve} generations\n'
+                    f"Results saved to {colorstr('bold', save_dir)}\n"
+                    f'Usage example: $ python train.py --hyp {evolve_yaml}')
 
 
 def run(**kwargs):

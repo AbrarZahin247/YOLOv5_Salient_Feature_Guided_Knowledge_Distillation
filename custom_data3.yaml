@@ -1,0 +1,15 @@
+
+#path: ./Okutama_Train_Val_Test  # dataset root dir
+path: /home/mlrobotics/exp/YOLOv5_Ultralytics/Okutama_Train_Val_Test
+train: train/images
+val: val/images
+test: test/images
+
+names:
+  0: run
+  1: sit
+  2: walk
+  3: bendover
+  4: stand
+  5: lying
+  6: unknown
