@@ -222,8 +222,9 @@ class ComputeLoss:
         lbox *= self.hyp['box']
         lobj *= self.hyp['obj']
         lcls *= self.hyp['cls']
+        bs = tobj.shape[0]
         
-        return lbox,lobj,lcls
+        return lbox,lobj,lcls,bs
             
     # def __call__(self,p,targets,student=None, teacher=None, teacher_accepted_batch=None):  # predictions, targets, model
         
@@ -249,10 +250,10 @@ class ComputeLoss:
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
 
         # Get teacher's predictions
-        lbox, lobj, lcls = self.get_lcls_lbox_lobj(p, tcls, tbox, indices, anchors)
+        lbox, lobj, lcls,bs = self.get_lcls_lbox_lobj(p, tcls, tbox, indices, anchors)
         
         roi_loss = torch.tensor(0.0, device=self.device)
-        distillation_factor = 0.5
+        distillation_factor = 0.1
 
         if teacher_accepted_batch is not None:
             teacher_accepted_batch_tensor = torch.tensor(teacher_accepted_batch, device=self.device)
@@ -264,7 +265,7 @@ class ComputeLoss:
                 roi_loss = torch.tensor(feature_mse(student_selected, teacher_selected), device=self.device)
                 roi_loss = roi_loss.mean()
 
-        total_loss = distillation_factor * roi_loss + lbox + lobj + lcls
+        total_loss = ((distillation_factor * roi_loss) + lbox + lobj + lcls)*bs
         return total_loss, torch.cat((lbox, lobj, lcls)).detach()
 
 
