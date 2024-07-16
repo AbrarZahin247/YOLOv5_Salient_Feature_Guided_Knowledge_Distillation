@@ -19,8 +19,7 @@ The YOLOv5n-attention-light model builds upon the YOLOv5n architecture with addi
 To get started, clone this repository and install the required dependencies:
 
 ```bash
-git clone https://github.com/your-username/YOLOv5n-attention-light.git
-cd YOLOv5n-attention-light
+git clone https://github.com/AbrarZahin247/YOLOv5_Salient_Map_Guided_Knowledge_Distillation.git && cd YOLOv5_Salient_Map_Guided_Knowledge_Distillation && git checkout light-attention
 pip install -r requirements.txt
 ```
 
