@@ -65,7 +65,7 @@ from utils.loss_without_tf import ComputeLoss
 from utils.cbam_multiply import CBAM
 # from utils.computeloss import ComputeLoss as TeacherComputeLoss
 # from utils.get_teacher_loss import get_teacher_model_label_bbox
-from utils.single_teacher_loss import single_teacher_loss
+# from utils.single_teacher_loss import single_teacher_loss
 
 
 from utils.metrics import fitness
