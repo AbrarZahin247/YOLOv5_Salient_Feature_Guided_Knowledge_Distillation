@@ -1,7 +1,7 @@
 
-# path: ./Okutama_Train_Val_Test/okutama-action-human-action-recognition-dataset
+path: ./Okutama_Train_Val_Test/
 # path: /kaggle/working/YOLOv5_Salient_Map_Guided_Knowledge_Distillation  # dataset root dir
-path: /kaggle/input/okutama-action-human-action-recognition-dataset
+# path: /kaggle/input/okutama-action-human-action-recognition-dataset
 train: train/images
 val: val/images
 test: test/images
