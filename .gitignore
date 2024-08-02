@@ -258,3 +258,6 @@ fabric.properties
 
 datasets
 *.zip
+Okutama_Train_Val_Test/
+yolov5l_ep20_map_0_7_640.pt
+yolov5n_map_0_62_640.pt
