@@ -1,0 +1,17 @@
+
+path: ./Okutama_Action_Dataset
+# path: /kaggle/working/YOLOv5_Salient_Map_Guided_Knowledge_Distillation  # dataset root dir
+# path: /kaggle/input/okutama-action-human-action-recognition-dataset
+train: train/images
+val: val_small/images
+# test: test/images
+
+names:
+  0: run
+  1: sit
+  2: walk
+  3: bendover
+  4: stand
+  5: lying
+  6: unknown
+
