@@ -156,11 +156,9 @@ class BaseModel(nn.Module):
         visualization.
         """
         return self._forward_once(x, profile, visualize)  # single-scale inference, train
-
-    def _forward_once(self, x, profile=False, visualize=False,target=None):
+    def _forward_once(self, x, profile=False, visualize=False):
         """Performs a forward pass on the YOLOv5 model, enabling profiling and feature visualization options."""
         y, dt = [], []  # outputs
-        cnt = 0
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
@@ -170,13 +168,28 @@ class BaseModel(nn.Module):
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
-            if isinstance(m, Concat):
-                cnt += 1
-                if cnt == 1:
-                    feature = x
-        if target is not None:
-            return x, feature
         return x
+    ## extracted feature layer additionally
+    # def _forward_once(self, x, profile=False, visualize=False,target=None):
+    #     """Performs a forward pass on the YOLOv5 model, enabling profiling and feature visualization options."""
+    #     y, dt = [], []  # outputs
+    #     cnt = 0
+    #     for m in self.model:
+    #         if m.f != -1:  # if not from previous layer
+    #             x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+    #         if profile:
+    #             self._profile_one_layer(m, x, dt)
+    #         x = m(x)  # run
+    #         y.append(x if m.i in self.save else None)  # save output
+    #         if visualize:
+    #             feature_visualization(x, m.type, m.i, save_dir=visualize)
+    #         if isinstance(m, Concat):
+    #             cnt += 1
+    #             if cnt == 1:
+    #                 feature = x
+    #     if target is not None:
+    #         return x, feature
+    #     return x
 
     def _profile_one_layer(self, m, x, dt):
         """Profiles a single layer's performance by computing GFLOPs, execution time, and parameters."""

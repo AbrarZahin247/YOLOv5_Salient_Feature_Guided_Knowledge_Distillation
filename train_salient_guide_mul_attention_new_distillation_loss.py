@@ -61,11 +61,10 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
 # from utils.loss import ComputeLoss
-from utils.loss_without_tf import ComputeLoss
+# from utils.loss_without_tf import ComputeLoss
+from utils.ultalytics_loss import ComputeLoss
+from utils.kd_loss import compute_distillation_output_loss,compute_distillation_feature_loss
 from utils.cbam_multiply import CBAM
-# from utils.computeloss import ComputeLoss as TeacherComputeLoss
-# from utils.get_teacher_loss import get_teacher_model_label_bbox
-# from utils.single_teacher_loss import single_teacher_loss
 
 
 from utils.metrics import fitness
@@ -718,10 +717,12 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     
                     
                     # teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
-                    
-
-                    loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(diff_background_std_feature), diff_background_tech_feature.detach())  # loss scaled by batch_size
-                    
+                    loss, loss_items = compute_loss(std_pred, targets.to(device)) 
+                    dloss =0 
+                    dloss = compute_distillation_output_loss(std_pred, tech_pred, model)
+                    loss += dloss
+                    salient_feature_loss=compute_distillation_feature_loss(stu_feature_adapt(diff_background_std_feature),diff_background_tech_feature.detach(),single_layer_only=True)            
+                    loss+=salient_feature_loss
                 else:
                     pred = model(imgs)  # forward
                     loss, loss_items = compute_loss(pred, targets)  # loss scaled by batch_size
