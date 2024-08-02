@@ -22,6 +22,8 @@ def compute_distillation_output_loss(p, t_p, model, dist_loss="l2", T=20, reg_no
     # per output
     for i, pi in enumerate(p):  # layer index, layer predictions
         t_pi = t_p[i]
+        batch_size,channel,feature_dim,_,layers=pi.shape
+        t_pi=t_pi.view(batch_size,channel,feature_dim,feature_dim,layers)
         t_obj_scale = t_pi[..., 4].sigmoid()
 
         
@@ -29,10 +31,11 @@ def compute_distillation_output_loss(p, t_p, model, dist_loss="l2", T=20, reg_no
         # BBox
         b_obj_scale = t_obj_scale.unsqueeze(-1).repeat(1, 1, 1, 1, 4)
         if not reg_norm:
-            print("pi shape: ", pi.shape)
-            print("t_pi shape: ", t_pi.shape)
-            print("pi[..., 2:4] shape: ", pi[..., 2:4].shape)
-            print("t_pi[..., 2:4] shape: ", t_pi[..., 2:4].shape)
+            #  tensor.view(16, 3, 80, 80, 2)
+            # print("pi shape: ", pi.shape)
+            # print("t_pi shape: ", t_pi.shape)
+            # print("pi[..., 2:4] shape: ", pi[..., 2:4].shape)
+            # print("t_pi[..., 2:4] shape: ", t_pi[..., 2:4].shape)
             t_lbox += torch.mean(DboxLoss(pi[..., :4],
                                           t_pi[..., :4]) * b_obj_scale)
             
@@ -64,29 +67,46 @@ def compute_distillation_output_loss(p, t_p, model, dist_loss="l2", T=20, reg_no
     dloss = (t_lobj + t_lbox + t_lcls) * bs
     return dloss
 
-def compute_distillation_feature_loss(s_f, t_f, model, loss,single_layer_only=False):
-    distillation_factor=0.01
-    h = model.hyp  # hyperparameters
-    ft = torch.cuda.FloatTensor if s_f[0].is_cuda else torch.Tensor
-    dl_1, dl_2, dl_3 = ft([0]), ft([0]), ft([0])
-    bs = s_f[0].shape[0]
+# def get_summed_up_feature_map(feature):
+#     bbox_coords = feature[..., :4]
+#     obj_scores = feature[..., 4].unsqueeze(-1)
+#     class_scores = feature[..., 5:]
 
-    loss_func1 = nn.MSELoss(reduction="mean")
-    dl_1 += loss_func1(s_f[0], t_f[0])
-    dl_1 *= h['dist'] * distillation_factor
+#     # Concatenate along the feature dimension
+#     combined_features = torch.cat((bbox_coords, obj_scores, class_scores), dim=-1)
+
+#     # Sum the concatenated features along the feature dimension
+#     summed_features = combined_features.sum(dim=-1)
+#     return summed_features
+
+# def compute_distillation_feature_loss(s_f, t_f, model, loss,single_layer_only=False):
+#     s_updated_f=get_summed_up_feature_map(s_f)
+#     t_updated_f=get_summed_up_feature_map(t_f)
+#     # print(f"stduent feature shape: {s_f.shape}")
+#     # print(f"teacher feature shape: {t_f.shape}")
+
+#     distillation_factor=0.01
+#     h = model.hyp  # hyperparameters
+#     ft = torch.cuda.FloatTensor if s_f[0].is_cuda else torch.Tensor
+#     dl_1, dl_2, dl_3 = ft([0]), ft([0]), ft([0])
+#     bs = s_f[0].shape[0]
+
+#     loss_func1 = nn.MSELoss(reduction="mean")
+#     dl_1 += loss_func1(s_updated_f,t_updated_f)
+#     dl_1 *= h['dist'] * distillation_factor
 
 
-    if(not single_layer_only):
-        loss_func2 = nn.MSELoss(reduction="mean")
-        loss_func3 = nn.MSELoss(reduction="mean")
-        dl_2 += loss_func2(s_f[1], t_f[1])
-        dl_3 += loss_func3(s_f[2], t_f[2])
-        dl_2 *= h['dist'] * distillation_factor
-        dl_3 *= h['dist'] * distillation_factor
-        loss += (dl_1 + dl_2 + dl_3) * bs
-        return loss
-    loss += (dl_1) * bs
-    return loss
+#     if(not single_layer_only):
+#         loss_func2 = nn.MSELoss(reduction="mean")
+#         loss_func3 = nn.MSELoss(reduction="mean")
+#         dl_2 += loss_func2(s_f[1], t_f[1])
+#         dl_3 += loss_func3(s_f[2], t_f[2])
+#         dl_2 *= h['dist'] * distillation_factor
+#         dl_3 *= h['dist'] * distillation_factor
+#         loss += (dl_1 + dl_2 + dl_3) * bs
+#         return loss
+#     loss += (dl_1) * bs
+#     return loss
 
 
    

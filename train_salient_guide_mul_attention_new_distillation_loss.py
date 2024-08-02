@@ -63,7 +63,7 @@ from utils.loggers.comet.comet_utils import check_comet_resume
 # from utils.loss import ComputeLoss
 # from utils.loss_without_tf import ComputeLoss
 from utils.ultalytics_loss import ComputeLoss
-from utils.kd_loss import compute_distillation_output_loss,compute_distillation_feature_loss
+from utils.kd_loss import compute_distillation_output_loss # compute_distillation_feature_loss
 from utils.cbam_multiply import CBAM
 
 
@@ -628,12 +628,13 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     if opt.teacher_weight:
         dump_image = torch.zeros((1, 3, opt.imgsz, opt.imgsz), device=device)
         targets = torch.Tensor([[0, 0, 0, 0, 0, 0]]).to(device)
-        _, features= model(dump_image, target=targets)  # forward
-        _, teacher_feature = teacher_model(dump_image, target=targets) 
-        
-        _, student_channel, student_out_size, _ = features.shape
-        _, teacher_channel, teacher_out_size, _ = teacher_feature.shape
-        # stu_feature_adapt = nn.Sequential(nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
+        features= model(dump_image)  # forward
+        teacher_feature = teacher_model(dump_image)
+        # print(features[0].shape)
+        # print(teacher_feature[0].shape)
+        _, student_channel, student_out_size, _,_= features[0].shape
+        _, teacher_channel, teacher_out_size, _,_ = teacher_feature[0].shape
+        stu_feature_adapt = nn.Sequential(nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
         stu_feature_adapt = nn.Sequential(CBAM(student_channel,r=2),nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
                   
                 
@@ -700,14 +701,16 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     
                     
                     # print(f"returned unique ===> {batch_mask.unique(return_counts=True)}")
-                    std_pred,std_features = model(imgs,target=targets)
-                    std_pred_masked, std_features_background= model(batch_background, target=targets)  # forward
-                    diff_background_std_feature=std_features-std_features_background
+                    std_pred = model(imgs)
+                    # print(f'student prediction => {std_pred[0].shape}')                    
+                    std_pred_masked= model(batch_background)  # forward
+                    # diff_background_std_pred=std_pred[0]-std_pred_masked[0]
                     
                     
-                    tech_pred,tech_features = teacher_model(imgs,target=targets)
-                    tech_pred_masked, tech_features_background= teacher_model(batch_background, target=targets)  # forward
-                    diff_background_tech_feature=tech_features-tech_features_background
+                    tech_pred = teacher_model(imgs)
+                    # print(f'teacher prediction => {tech_pred[0].shape}')
+                    tech_pred_masked= teacher_model(batch_background)  # forward
+                    # diff_background_tech_pred=tech_pred[0]-tech_pred_masked[0]
                    
                     # teacher_loss,teacher_loss_items=single_teacher_loss(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
                     # print(teacher_loss)
@@ -718,11 +721,16 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     
                     # teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
                     loss, loss_items = compute_loss(std_pred, targets.to(device)) 
-                    dloss =0 
-                    dloss = compute_distillation_output_loss(std_pred, tech_pred, model)
-                    loss += dloss
-                    salient_feature_loss=compute_distillation_feature_loss(stu_feature_adapt(diff_background_std_feature),diff_background_tech_feature.detach(),single_layer_only=True)            
-                    loss+=salient_feature_loss
+                    
+                    distillation_factor_full=0.002
+                    distillation_factor_back=0.001
+                    dloss_full = compute_distillation_output_loss(std_pred, tech_pred, model)
+                    dloss_back = compute_distillation_output_loss(std_pred_masked, tech_pred_masked, model)
+                    distillation_loss= dloss_full*distillation_factor_full+dloss_back*distillation_factor_back
+                    loss +=distillation_loss
+                    
+                    # salient_feature_loss=compute_distillation_feature_loss(stu_feature_adapt(diff_background_std_pred),diff_background_tech_pred.detach(),single_layer_only=True)            
+                    # loss+=salient_feature_loss
                 else:
                     pred = model(imgs)  # forward
                     loss, loss_items = compute_loss(pred, targets)  # loss scaled by batch_size
@@ -857,7 +865,7 @@ def parse_opt(known=False):
     parser.add_argument('--teacher_weight', type=str, default= '', help='initial weights path')
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
-    parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
+    parser.add_argument('--hyp', type=str, default=ROOT / 'data\hyps\hyp.scratch.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=100, help='total training epochs')
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
