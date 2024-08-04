@@ -252,7 +252,7 @@ class ComputeLoss:
 
         # Get teacher's predictions
         lbox, lobj, lcls,bs = self.get_lcls_lbox_lobj(p, tcls, tbox, indices, anchors)
-        print(f"obj cls box :==> {lbox},{lobj},{lcls}")
+        # print(f"obj cls box :==> {lbox},{lobj},{lcls}")
         roi_loss = torch.tensor(0.0, device=self.device)
 
         roi_loss = torch.tensor(feature_mse(student, teacher), device=self.device)
