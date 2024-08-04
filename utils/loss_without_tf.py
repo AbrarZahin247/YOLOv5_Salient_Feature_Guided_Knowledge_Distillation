@@ -252,9 +252,9 @@ class ComputeLoss:
 
         # Get teacher's predictions
         lbox, lobj, lcls,bs = self.get_lcls_lbox_lobj(p, tcls, tbox, indices, anchors)
-        
+        print(f"obj cls box :==> {lbox},{lobj},{lcls}")
         roi_loss = torch.tensor(0.0, device=self.device)
-        distillation_factor = 0.1
+        distillation_factor = 1e-1
 
         roi_loss = torch.tensor(feature_mse(student, teacher), device=self.device)
         roi_loss = roi_loss.float().mean()
@@ -268,7 +268,7 @@ class ComputeLoss:
         #         teacher_selected = torch.index_select(teacher, 0, selected_teacher_indices)
                 
 
-        total_loss = ((distillation_factor * roi_loss) + (lbox + lobj + lcls))*bs
+        total_loss = (distillation_factor * roi_loss) + (lbox + lobj + lcls)*bs
         return total_loss, torch.cat((lbox, lobj, lcls)).detach()
 
 

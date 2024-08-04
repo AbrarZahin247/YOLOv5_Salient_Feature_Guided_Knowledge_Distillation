@@ -1,9 +1,9 @@
 # path: /content/drive/MyDrive/Msc_Thesis_Work_July24/31_July_24/YOLOv5_Salient_Map_Guided_Knowledge_Distillation/Okutama_Action_Dataset
-# path: ./Okutama_Action_Dataset
+path: ./Okutama_Action_Dataset
 # path: /kaggle/working/YOLOv5_Salient_Map_Guided_Knowledge_Distillation  # dataset root dir
 # path: /kaggle/input/okutama-action-human-action-recognition-dataset
-train: Okutama_Action_Dataset/train/
-val: Okutama_Action_Dataset/val_small/
+train: train/images
+val: val/images
 # test: test/images
 
 names:
