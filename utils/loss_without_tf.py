@@ -247,28 +247,18 @@ class ComputeLoss:
     #     total_loss=distillation_factor*roi_loss+lbox+lobj+lcls
     #     return total_loss, torch.cat((lbox, lobj, lcls)).detach()
     
-    def __call__(self, p, targets, student=None, teacher=None):  # predictions, targets, model
+    def __call__(self, p, targets, student=None, teacher=None, dist_factor=1e-1):  # predictions, targets, model
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
 
         # Get teacher's predictions
         lbox, lobj, lcls,bs = self.get_lcls_lbox_lobj(p, tcls, tbox, indices, anchors)
         print(f"obj cls box :==> {lbox},{lobj},{lcls}")
         roi_loss = torch.tensor(0.0, device=self.device)
-        distillation_factor = 1e-1
 
         roi_loss = torch.tensor(feature_mse(student, teacher), device=self.device)
         roi_loss = roi_loss.float().mean()
         
-        # if teacher_accepted_batch is not None:
-        #     teacher_accepted_batch_tensor = torch.tensor(teacher_accepted_batch, device=self.device)
-        #     selected_teacher_indices = torch.nonzero(teacher_accepted_batch_tensor).squeeze()
-
-        #     if selected_teacher_indices.numel() > 0:  # Check if selected indices tensor has elements
-        #         student_selected = torch.index_select(student, 0, selected_teacher_indices)
-        #         teacher_selected = torch.index_select(teacher, 0, selected_teacher_indices)
-                
-
-        total_loss = (distillation_factor * roi_loss) + (lbox + lobj + lcls)*bs
+        total_loss = (dist_factor * roi_loss) + (lbox + lobj + lcls)*bs
         return total_loss, torch.cat((lbox, lobj, lcls)).detach()
 
 

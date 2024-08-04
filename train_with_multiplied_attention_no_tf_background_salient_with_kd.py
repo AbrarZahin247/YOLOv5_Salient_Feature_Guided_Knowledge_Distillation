@@ -714,13 +714,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     # print(teacher_loss)
                     # tensor_batch_index,tensor_bbox=get_teacher_model_label_bbox(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
                     # pred_mask=prepare_batch_mask_tensor(tensor_batch_index, tensor_bbox, batch_size, img_w, img_h, device)
-                    
-                    
-                    
                     # teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
-                    
 
-                    loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(diff_background_std_feature), diff_background_tech_feature.detach())  # loss scaled by batch_size
+                    loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(diff_background_std_feature), diff_background_tech_feature.detach(),dist_factor=opt.dist_factor)  # loss scaled by batch_size
                     
                 else:
                     pred = model(imgs)  # forward
@@ -854,6 +850,7 @@ def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
     parser.add_argument('--teacher_weight', type=str, default= '', help='initial weights path')
+    parser.add_argument('--dist_factor', type=float, default= '1e-1', help='initial weights path')
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
