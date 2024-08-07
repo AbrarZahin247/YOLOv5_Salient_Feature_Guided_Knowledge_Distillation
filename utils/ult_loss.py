@@ -1,29 +1,32 @@
-# YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
-"""
-Loss functions
-"""
+# Ultralytics YOLOv5 🚀, AGPL-3.0 license
+"""Loss functions."""
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from utils.metrics import bbox_iou
 from utils.torch_utils import de_parallel
 
 
-def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
-    # return positive, negative label smoothing BCE targets
+def smooth_BCE(eps=0.1):
+    """Returns label smoothing BCE targets for reducing overfitting; pos: `1.0 - 0.5*eps`, neg: `0.5*eps`. For details see https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441"""
     return 1.0 - 0.5 * eps, 0.5 * eps
 
 
 class BCEBlurWithLogitsLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
     def __init__(self, alpha=0.05):
+        """Initializes a modified BCEWithLogitsLoss with reduced missing label effects, taking optional alpha smoothing
+        parameter.
+        """
         super().__init__()
-        self.loss_fcn = nn.BCEWithLogitsLoss(reduction='none')  # must be nn.BCEWithLogitsLoss()
+        self.loss_fcn = nn.BCEWithLogitsLoss(reduction="none")  # must be nn.BCEWithLogitsLoss()
         self.alpha = alpha
 
     def forward(self, pred, true):
+        """Computes modified BCE loss for YOLOv5 with reduced missing label effects, taking pred and true tensors,
+        returns mean loss.
+        """
         loss = self.loss_fcn(pred, true)
         pred = torch.sigmoid(pred)  # prob from logits
         dx = pred - true  # reduce only missing label effects
@@ -36,14 +39,18 @@ class BCEBlurWithLogitsLoss(nn.Module):
 class FocalLoss(nn.Module):
     # Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
+        """Initializes FocalLoss with specified loss function, gamma, and alpha values; modifies loss reduction to
+        'none'.
+        """
         super().__init__()
         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = loss_fcn.reduction
-        self.loss_fcn.reduction = 'none'  # required to apply FL to each element
+        self.loss_fcn.reduction = "none"  # required to apply FL to each element
 
     def forward(self, pred, true):
+        """Calculates the focal loss between predicted and true labels using a modified BCEWithLogitsLoss."""
         loss = self.loss_fcn(pred, true)
         # p_t = torch.exp(-loss)
         # loss *= self.alpha * (1.000001 - p_t) ** self.gamma  # non-zero power for gradient stability
@@ -55,9 +62,9 @@ class FocalLoss(nn.Module):
         modulating_factor = (1.0 - p_t) ** self.gamma
         loss *= alpha_factor * modulating_factor
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return loss.mean()
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return loss.sum()
         else:  # 'none'
             return loss
@@ -66,14 +73,18 @@ class FocalLoss(nn.Module):
 class QFocalLoss(nn.Module):
     # Wraps Quality focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
     def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
+        """Initializes Quality Focal Loss with given loss function, gamma, alpha; modifies reduction to 'none'."""
         super().__init__()
         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = loss_fcn.reduction
-        self.loss_fcn.reduction = 'none'  # required to apply FL to each element
+        self.loss_fcn.reduction = "none"  # required to apply FL to each element
 
     def forward(self, pred, true):
+        """Computes the focal loss between `pred` and `true` using BCEWithLogitsLoss, adjusting for imbalance with
+        `gamma` and `alpha`.
+        """
         loss = self.loss_fcn(pred, true)
 
         pred_prob = torch.sigmoid(pred)  # prob from logits
@@ -81,56 +92,32 @@ class QFocalLoss(nn.Module):
         modulating_factor = torch.abs(true - pred_prob) ** self.gamma
         loss *= alpha_factor * modulating_factor
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return loss.mean()
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return loss.sum()
         else:  # 'none'
             return loss
 
-
-def imitation_loss(teacher, student, mask):
-    if student is None or teacher is None:
-        return 0
-    # print(teacher.shape, student.shape, mask.shape)
-    diff = torch.pow(student - teacher, 2) * mask
-    diff = diff.sum() / mask.sum() / 2
-
-    return diff
-
-
-
-def feature_mse(feature_map1, feature_map2):
-        loss=0
-        if(feature_map1 is not None and feature_map2 is not None):
-            # loss = F.binary_cross_entropy_with_logits(F.sigmoid(feature_map1), F.sigmoid(feature_map2))
-            loss = F.mse_loss(feature_map1, feature_map2)
-        return loss
-
-def feature_cross_entropy(feature_map1, feature_map2):
-        loss=0
-        if(feature_map1 is not None and feature_map2 is not None):
-            # loss = F.binary_cross_entropy_with_logits(F.sigmoid(feature_map1), F.sigmoid(feature_map2))
-            loss = F.binary_cross_entropy_with_logits(feature_map1, feature_map2)
-        return loss
 
 class ComputeLoss:
     sort_obj_iou = False
 
     # Compute losses
     def __init__(self, model, autobalance=False):
+        """Initializes ComputeLoss with model and autobalance option, autobalances losses if True."""
         device = next(model.parameters()).device  # get model device
         h = model.hyp  # hyperparameters
 
         # Define criteria
-        BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
-        BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
+        BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["cls_pw"]], device=device))
+        BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["obj_pw"]], device=device))
 
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
-        self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
+        self.cp, self.cn = smooth_BCE(eps=h.get("label_smoothing", 0.0))  # positive, negative BCE targets
 
         # Focal loss
-        g = h['fl_gamma']  # focal loss gamma
+        g = h["fl_gamma"]  # focal loss gamma
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
@@ -143,40 +130,15 @@ class ComputeLoss:
         self.nl = m.nl  # number of layers
         self.anchors = m.anchors
         self.device = device
-        
-    def xywh_to_xyxy(self,boxes, image_size=640):
-        """
-        Convert bounding boxes from (x, y, w, h) format to (x1, y1, x2, y2) format.
-        
-        Args:
-            boxes (torch.Tensor): Tensor of shape (N, 4) containing bounding boxes in (x, y, w, h) format.
-            image_size (tuple): Tuple containing the width and height of the image.
-            
-        Returns:
-            torch.Tensor: Tensor of shape (N, 4) containing bounding boxes in (x1, y1, x2, y2) format.
-        """
-        width, height = image_size,image_size
-        x1 = boxes[:, 0] - boxes[:, 2] / 2
-        y1 = boxes[:, 1] - boxes[:, 3] / 2
-        x2 = boxes[:, 0] + boxes[:, 2] / 2
-        y2 = boxes[:, 1] + boxes[:, 3] / 2
-        
-        # Clamp values to be within image boundaries
-        x1 = torch.clamp(x1, 0, width)
-        y1 = torch.clamp(y1, 0, height)
-        x2 = torch.clamp(x2, 0, width)
-        y2 = torch.clamp(y2, 0, height)
-    
-        return torch.stack((x1, y1, x2, y2), dim=1)
-        
-    # def get_gt_bbox(self,p,targets):
-    #     _, tboxs, __, ___ = self.build_targets(p, targets) ## tcls, tboxs, indices, anchors
-    #     return self.xywh_to_xyxy(boxes=tboxs)
-    
-    def get_lcls_lbox_lobj(self,p,tcls, tbox, indices, anchors):
+
+    def __call__(self, p, targets):  # predictions, targets
+        """Performs forward pass, calculating class, box, and object loss for given predictions and targets."""
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
         lobj = torch.zeros(1, device=self.device)  # object loss
+        tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+
+        # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
             tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
@@ -219,61 +181,17 @@ class ComputeLoss:
 
         if self.autobalance:
             self.balance = [x / self.balance[self.ssi] for x in self.balance]
-        lbox *= self.hyp['box']
-        lobj *= self.hyp['obj']
-        lcls *= self.hyp['cls']
+        lbox *= self.hyp["box"]
+        lobj *= self.hyp["obj"]
+        lcls *= self.hyp["cls"]
         bs = tobj.shape[0]  # batch size
 
-        
-        return lbox,lobj,lcls,bs
-            
-    # def __call__(self,p,targets,student=None, teacher=None, teacher_accepted_batch=None):  # predictions, targets, model
-        
-    #     tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
-        
-    #     ## teachers predictions
-        
-    #     # print(f"teacher batch ===> {len(teacher_accepted_batch[0])}")
-    #     lbox,lobj,lcls=self.get_lcls_lbox_lobj(p,tcls, tbox, indices, anchors)
-    #     roi_loss=torch.zeros(1, device=self.device)
-    #     distillation_factor=0.5
-    #     if(teacher_accepted_batch!=None):
-    #         for index,single_item in enumerate(teacher_accepted_batch):
-    #             if(single_item==1):
-    #                 roi_loss+=torch.tensor(feature_mse(student[index],teacher[index]))
-    #         roi_loss=roi_loss/sum(teacher_accepted_batch)
-    #         # roi_inv_loss=feature_mse(student_inv,teacher_inv)
-    #         # total_loss=foward_factor*roi_loss+backward_factor*roi_inv_loss
-    #     total_loss=distillation_factor*roi_loss+lbox+lobj+lcls
-    #     return total_loss, torch.cat((lbox, lobj, lcls)).detach()
-    
-    def __call__(self, p, targets, student=None, teacher=None):  # predictions, targets, model
-        tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
-
-        # Get teacher's predictions
-        lbox, lobj, lcls,bs = self.get_lcls_lbox_lobj(p, tcls, tbox, indices, anchors)
-        
-        roi_loss = torch.tensor(0.0, device=self.device)
-        distillation_factor = 0.1
-
-        roi_loss = torch.tensor(feature_mse(student, teacher), device=self.device)
-        roi_loss = roi_loss.float().mean()
-        
-        # if teacher_accepted_batch is not None:
-        #     teacher_accepted_batch_tensor = torch.tensor(teacher_accepted_batch, device=self.device)
-        #     selected_teacher_indices = torch.nonzero(teacher_accepted_batch_tensor).squeeze()
-
-        #     if selected_teacher_indices.numel() > 0:  # Check if selected indices tensor has elements
-        #         student_selected = torch.index_select(student, 0, selected_teacher_indices)
-        #         teacher_selected = torch.index_select(teacher, 0, selected_teacher_indices)
-                
-
-        total_loss = (distillation_factor * roi_loss) + ((lbox + lobj + lcls))*bs
-        return total_loss, torch.cat((lbox, lobj, lcls)).detach()
-
+        return (lbox + lobj + lcls) * bs, torch.cat((lbox, lobj, lcls)).detach()
 
     def build_targets(self, p, targets):
-        # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+        """Prepares model targets from input targets (image,class,x,y,w,h) for loss computation, returning class, box,
+        indices, and anchors.
+        """
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, indices, anch = [], [], [], []
         gain = torch.ones(7, device=self.device)  # normalized to gridspace gain
@@ -281,16 +199,20 @@ class ComputeLoss:
         targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # append anchor indices
 
         g = 0.5  # bias
-        off = torch.tensor(
-            [
-                [0, 0],
-                [1, 0],
-                [0, 1],
-                [-1, 0],
-                [0, -1],  # j,k,l,m
-                # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
-            ],
-            device=self.device).float() * g  # offsets
+        off = (
+            torch.tensor(
+                [
+                    [0, 0],
+                    [1, 0],
+                    [0, 1],
+                    [-1, 0],
+                    [0, -1],  # j,k,l,m
+                    # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
+                ],
+                device=self.device,
+            ).float()
+            * g
+        )  # offsets
 
         for i in range(self.nl):
             anchors, shape = self.anchors[i], p[i].shape
@@ -301,7 +223,7 @@ class ComputeLoss:
             if nt:
                 # Matches
                 r = t[..., 4:6] / anchors[:, None]  # wh ratio
-                j = torch.max(r, 1 / r).max(2)[0] < self.hyp['anchor_t']  # compare
+                j = torch.max(r, 1 / r).max(2)[0] < self.hyp["anchor_t"]  # compare
                 # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
                 t = t[j]  # filter
 
