@@ -27,7 +27,7 @@ class NetwithLoss(torch.nn.Module):
         diff_predT = diff_predT.reshape(batch, anchor,dim_w, dim_h, class_and_bbox)
         # print(f"student shape ==> {pred[0].shape}")
         # print(f"student shape ==> {pred[0][:,].shape}")
-        first_anchor_feature,second_anchor_feature,third_anchor_feature=diff_pred[0][:, 0, :, :, :],diff_pred[0][:, 1, :, :, :],diff_pred[0][:, 2, :, :, :]
+        first_anchor_feature,second_anchor_feature,third_anchor_feature=diff_pred[:, 0, :, :, :],diff_pred[:, 1, :, :, :],diff_pred[:, 2, :, :, :]
         first_anchor_feature_T,second_anchor_feature_T,third_anchor_feature_T=diff_predT[:, 0, :, :, :],diff_predT[:, 1, :, :, :],diff_predT[:, 2, :, :, :]
         
 
