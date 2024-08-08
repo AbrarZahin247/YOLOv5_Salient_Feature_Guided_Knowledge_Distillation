@@ -20,11 +20,11 @@ class NetwithLoss(torch.nn.Module):
         pred = self.student(imgs)
         pred_back = self.student(backgrounds)
         diff_pred=pred[0]-pred_back[0]
-        batch,anchor,dim_w,dim_h,class_and_bbox=diff_pred[0].shape
+        batch,anchor,dim_w,dim_h,class_and_bbox=diff_pred.shape
         predT_Raw = self.teacher(imgs)
         predT_Raw_back = self.teacher(backgrounds)
         diff_predT=predT_Raw[0]-predT_Raw_back[0]
-        diff_predT = diff_predT[0].reshape(batch, anchor,dim_w, dim_h, class_and_bbox)
+        diff_predT = diff_predT.reshape(batch, anchor,dim_w, dim_h, class_and_bbox)
         # print(f"student shape ==> {pred[0].shape}")
         # print(f"student shape ==> {pred[0][:,].shape}")
         first_anchor_feature,second_anchor_feature,third_anchor_feature=diff_pred[0][:, 0, :, :, :],diff_pred[0][:, 1, :, :, :],diff_pred[0][:, 2, :, :, :]
