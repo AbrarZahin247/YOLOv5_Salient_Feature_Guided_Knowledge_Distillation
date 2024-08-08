@@ -4,7 +4,7 @@ path: ./Okutama_Action_Dataset
 # path: /kaggle/input/okutama-action-human-action-recognition-dataset
 train: train/images
 val: val/images
-val: val/images
+# val: val_small/images
 # test: test/images
 
 names:
