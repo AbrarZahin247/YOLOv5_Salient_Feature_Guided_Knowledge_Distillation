@@ -696,7 +696,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 targets = targets.to(device)
                 if opt.teacher_weight:
                     batch_size, _, img_w, img_h = imgs.size()
-                    
                     gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
                     
                     inv_gt_mask=1-gt_mask
