@@ -16,6 +16,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import torch
+from utils import torch_utils
 import torch.nn as nn
 
 FILE = Path(__file__).resolve()
@@ -151,31 +152,55 @@ class Segment(Detect):
 class BaseModel(nn.Module):
     """YOLOv5 base model."""
 
-    def forward(self, x, profile=False, visualize=False):
+    def forward(self, x, profile=False):
         """Executes a single-scale inference or training pass on the YOLOv5 base model, with options for profiling and
         visualization.
         """
-        return self._forward_once(x, profile, visualize)  # single-scale inference, train
+        return self._forward_once(x, profile)  # single-scale inference, train
 
-    def _forward_once(self, x, profile=False, visualize=False,target=None):
-        """Performs a forward pass on the YOLOv5 model, enabling profiling and feature visualization options."""
+    # def _forward_once(self, x, profile=False, visualize=False,target=None):
+    #     """Performs a forward pass on the YOLOv5 model, enabling profiling and feature visualization options."""
+    #     y, dt = [], []  # outputs
+    #     cnt = 0
+    #     for m in self.model:
+    #         if m.f != -1:  # if not from previous layer
+    #             x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+    #         if profile:
+    #             self._profile_one_layer(m, x, dt)
+    #         x = m(x)  # run
+    #         y.append(x if m.i in self.save else None)  # save output
+    #         if visualize:
+    #             feature_visualization(x, m.type, m.i, save_dir=visualize)
+    #         if isinstance(m, Concat):
+    #             cnt += 1
+    #             if cnt == 1:
+    #                 feature = x
+    #     if target is not None:
+    #         return x, feature
+    #     return x
+    def _forward_once(self, x, profile=False):
         y, dt = [], []  # outputs
-        cnt = 0
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+
             if profile:
-                self._profile_one_layer(m, x, dt)
+                try:
+                    import thop
+                    o = thop.profile(m, inputs=(x,), verbose=False)[0] / 1E9 * 2  # FLOPS
+                except:
+                    o = 0
+                t = torch_utils.time_synchronized()
+                for _ in range(10):
+                    _ = m(x)
+                dt.append((torch_utils.time_synchronized() - t) * 100)
+                print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
+
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
-            if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
-            if isinstance(m, Concat):
-                cnt += 1
-                if cnt == 1:
-                    feature = x
-        if target is not None:
-            return x, feature
+
+        if profile:
+            print('%.1fms total' % sum(dt))
         return x
 
     def _profile_one_layer(self, m, x, dt):
@@ -223,7 +248,7 @@ class BaseModel(nn.Module):
 
 class DetectionModel(BaseModel):
     # YOLOv5 detection model
-    def __init__(self, cfg="yolov5s.yaml", ch=3, nc=None, anchors=None):
+    def __init__(self, cfg="yolov5n.yaml", ch=3, nc=None, anchors=None):
         """Initializes YOLOv5 model with configuration file, input channels, number of classes, and custom anchors."""
         super().__init__()
         if isinstance(cfg, dict):
@@ -262,6 +287,8 @@ class DetectionModel(BaseModel):
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
             self._initialize_biases()  # only run once
+            self.na = m.anchors.shape[1]
+            self.nl = m.anchors.shape[0]
 
         # Init weights, biases
         initialize_weights(self)
@@ -272,7 +299,7 @@ class DetectionModel(BaseModel):
         """Performs single-scale or augmented inference and may include profiling or visualization."""
         if augment:
             return self._forward_augment(x)  # augmented inference, None
-        return self._forward_once(x, profile, visualize,target)  # single-scale inference, train
+        return self._forward_once(x, profile)  # single-scale inference, train
 
     def _forward_augment(self, x):
         """Performs augmented inference across different scales and flips, returning combined detections."""
@@ -334,6 +361,13 @@ class DetectionModel(BaseModel):
                 math.log(0.6 / (m.nc - 0.99999)) if cf is None else torch.log(cf / cf.sum())
             )  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
+    def get_anchors(self):
+        """Returns the anchors used in the model."""
+        m = self.model[-1]  # Detect()
+        if isinstance(m, (Detect, Segment)):
+            return m.anchors
+        else:
+            raise TypeError("The last layer of the model is not a detection layer.")
 
 
 Model = DetectionModel  # retain YOLOv5 'Model' class for backwards compatibility
