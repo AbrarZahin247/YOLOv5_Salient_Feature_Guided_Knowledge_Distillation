@@ -29,7 +29,8 @@ class NetwithLoss(torch.nn.Module):
         # print(f"student shape ==> {pred[0][:,].shape}")
         first_anchor_feature,second_anchor_feature,third_anchor_feature=diff_pred[:, 0, :, :, :],diff_pred[:, 1, :, :, :],diff_pred[:, 2, :, :, :]
         first_anchor_feature_T,second_anchor_feature_T,third_anchor_feature_T=diff_predT[:, 0, :, :, :],diff_predT[:, 1, :, :, :],diff_predT[:, 2, :, :, :]
-        
+        # print(f"first anchor student ==> {first_anchor_feature.shape}")
+        # print(f"first anchor teacher ==> {first_anchor_feature_T.shape}")
 
         hint_loss = self.sl1(first_anchor_feature, first_anchor_feature_T) + \
                     self.sl1(second_anchor_feature, second_anchor_feature_T) + \
@@ -41,6 +42,6 @@ class NetwithLoss(torch.nn.Module):
         # Loss
         # loss, loss_items = compute_loss([pred[0], pred[1], pred[2]], targets.cuda(), self.student)  # scaled by batch_size
         compute_loss=ComputeLoss(self.student)
-        loss, loss_items = compute_loss(diff_pred, targets)  # scaled by batch_size
+        loss, loss_items = compute_loss(pred, targets)  # scaled by batch_size
         # print(f"base losses ==> {loss}")
         return loss+hint_loss, loss_items
