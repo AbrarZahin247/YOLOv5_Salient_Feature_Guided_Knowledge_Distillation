@@ -2,3 +2,12 @@ python train_with_multiplied_attention_no_tf_background_salient_with_kd.py --dat
 
 ============================
 python train_odkd_salient_feat_guide.py --data custom_data2.yaml --teacher_weight yolov5l_ep20_map_0_7_640.pt --weight '' --cfg models/yolov5n_light_attention.yaml --epochs 50 --batch-size 16 --imgsz 640
+============================
+python train_salguide_smoothl1loss.py --data custom_data.yaml --teacher_weight yolov5l_ep20_map_0_7_640.pt --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --epochs 50 --batch-size 24  --imgsz 640 --device 0
+
+================================
+python train_self_dist_complemnetary_distillation_smoothl1loss_aug_28.py --data custom_data.yaml --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --epochs 50 --batch-size 64  --imgsz 640 --device 0
+================================
+python train_self_dist_dualloss_aug_27.py --data custom_data2.yaml --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --epochs 50 --batch-size 64 --imgsz 640 --device 1
+================================
+python train_self_dist_dualloss_aug_27.py --data custom_data.yaml --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --epochs 50 --batch-size 56 --imgsz 640 --device 0

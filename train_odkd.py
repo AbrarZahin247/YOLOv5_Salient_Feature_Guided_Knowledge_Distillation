@@ -62,7 +62,7 @@ from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
 # from utils.loss import ComputeLoss
 from utils.loss_without_tf import ComputeLoss
-from utils.odkd_loss import NetwithLoss
+from YOLOv5_Salient_Feature_Guided_Knowledge_Distillation.utils.smoothL1_loss import NetwithLoss
 from utils.cbam_multiply import CBAM
 # from utils.computeloss import ComputeLoss as TeacherComputeLoss
 # from utils.get_teacher_loss import get_teacher_model_label_bbox

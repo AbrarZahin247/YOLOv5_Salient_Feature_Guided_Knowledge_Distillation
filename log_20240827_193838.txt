@@ -1,0 +1,43 @@
+
+    Script Name: train_self_dist_smoothl1loss_aug_27.py
+    Execution Time: 2024-08-27 19:38:38 to 2024-08-27 19:38:38
+    Runtime: 0:00:00.000011
+    Arguments:
+        weights: pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt
+    cfg: 
+    data: custom_data.yaml
+    hyp: data/hyps/hyp.scratch-low.yaml
+    epochs: 50
+    batch_size: 80
+    imgsz: 640
+    rect: False
+    resume: False
+    nosave: False
+    noval: False
+    noautoanchor: False
+    noplots: False
+    evolve: None
+    bucket: 
+    cache: None
+    image_weights: False
+    device: 0
+    multi_scale: False
+    single_cls: False
+    optimizer: SGD
+    sync_bn: False
+    workers: 8
+    project: runs/train
+    name: exp
+    exist_ok: False
+    quad: False
+    cos_lr: False
+    label_smoothing: 0.0
+    patience: 100
+    freeze: [0]
+    save_period: -1
+    seed: 0
+    local_rank: -1
+    entity: None
+    upload_dataset: False
+    bbox_interval: -1
+    artifact_alias: latest
