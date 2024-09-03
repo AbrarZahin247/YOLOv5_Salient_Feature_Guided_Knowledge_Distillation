@@ -123,19 +123,19 @@ def log_execution_details(args):
     ## save info
     log_dir = "log_files"
     log_file_name=opt.save_dir.replace("\\","_")
-    log_file_name=f"log_{log_file_name}_{timestamp}.txt"
-    print(log_file_name)
+    log_file_p=f"log_{log_file_name}_{timestamp}.txt"
+    print(log_file_p)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
     # Full path to the log file
-    log_filepath = os.path.join(log_dir, log_file_name)
+    log_file_path = os.path.join(log_dir, log_file_p)
 
     # Write log to file
-    with open(log_filepath, 'w') as log_file:
+    with open(log_file_path, 'w') as log_file:
         log_file.write(log_content)
 
-    print(f"Log written to {log_filepath}")
+    print(f"Log written to {log_file_path}")
 
 def create_masks_from_batch(batch_images, n=1, divisor=16):
     batch_size, _, image_size, _ = batch_images.size()
