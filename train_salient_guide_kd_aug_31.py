@@ -122,7 +122,8 @@ def log_execution_details(args):
     # Ensure the log_files directory exists
     ## save info
     log_dir = "log_files"
-    log_file_name=opt.save_dir.replace("\\","_")
+    # log_file_name=opt.save_dir.replace("\\","_")
+    log_file_name=opt.save_dir.replace("/","_")
     log_file_p=f"log_{log_file_name}_{timestamp}.txt"
     print(log_file_p)
     if not os.path.exists(log_dir):
