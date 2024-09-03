@@ -89,24 +89,24 @@ class SelfDistLoss(torch.nn.Module):
     def forward(self, imgs, targets,gt_masks):
         loss_factor=1e-2
         inv_masks=1-gt_masks
-        # gt_images=imgs*gt_masks
-        bg_images=imgs*inv_masks
+        gt_images=imgs*gt_masks
+        # bg_images=imgs*inv_masks
         # print(torch.unique(gt_images))
         # show_all_images_from_batch(gt_images)
         # print(gt_images.shape)
         # Move inputs to the correct device
         tensor_mode=find_non_zero_mode(imgs)
-        # gt_images[gt_images == 0] = tensor_mode
-        bg_images[bg_images == 0] = tensor_mode
+        gt_images[gt_images == 0] = tensor_mode
+        # bg_images[bg_images == 0] = tensor_mode
         
         imgs = imgs.to(self.device)
-        # gt_images = gt_images.to(self.device)
-        bg_images = bg_images.to(self.device)
+        gt_images = gt_images.to(self.device)
+        # bg_images = bg_images.to(self.device)
         targets = targets.to(self.device)
 
         pred = self.student(imgs)
-        # pred_gt=self.student(gt_images)
-        pred_bg=self.student(bg_images)
+        pred_gt=self.student(gt_images)
+        # pred_bg=self.student(bg_images)
         # print(targets.shape)
         # print(targets[0])
         
@@ -127,11 +127,11 @@ class SelfDistLoss(torch.nn.Module):
         
         compute_loss = ComputeLoss(self.student)
         loss, loss_items = compute_loss(pred, targets)  # scaled by batch_size
-        # loss_gt, loss_items_gt = compute_loss(pred_gt, targets)  # scaled by batch_size
-        loss_bg, _ = compute_loss(pred_bg, zero_targets)  # scaled by batch_size
+        loss_gt, loss_items_gt = compute_loss(pred_gt, targets)  # scaled by batch_size
+        # loss_bg, _ = compute_loss(pred_bg, zero_targets)  # scaled by batch_size
         
         
         # print(f"loss gt {loss_gt} and bg_loss {loss_bg}")
         
         # print(f"loss_gt {loss_gt} loss {loss}")
-        return loss+loss_bg, loss_items
+        return loss+loss_gt, loss_items

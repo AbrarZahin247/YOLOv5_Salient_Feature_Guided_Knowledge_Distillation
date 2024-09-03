@@ -26,6 +26,7 @@
 storage.googleapis.com
 runs/*
 data/*
+log_files/*
 data/images/*
 !data/*.yaml
 !data/hyps

@@ -60,7 +60,7 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
                            yaml_save)
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
-# from utils.loss import ComputeLoss
+from utils.ult_loss import ComputeLoss
 # from utils.loss_without_tf import ComputeLoss
 # from utils.smoothL1_salient_guide_kd_loss import NetwithLoss
 # from utils.loss_self_distillation_aug_27 import SelfDistLoss
@@ -75,9 +75,9 @@ from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, select_devi
                                smart_resume, torch_distributed_zero_first)
 
 ## for windows only
-# import pathlib
-# temp = pathlib.PosixPath
-# pathlib.PosixPath = pathlib.WindowsPath
+import pathlib
+temp = pathlib.PosixPath
+pathlib.PosixPath = pathlib.WindowsPath
 
 
 
@@ -117,15 +117,19 @@ def log_execution_details(args):
 
     # Create a timestamp for the filename
     timestamp = start_time.strftime('%Y%m%d_%H%M%S')
-    log_filename = f"log_{timestamp}.txt"
+    # log_filename = f"log_{timestamp}.txt"
 
     # Ensure the log_files directory exists
+    ## save info
     log_dir = "log_files"
+    log_file_name=opt.save_dir.replace("\\","_")
+    log_file_name=f"log_{log_file_name}_{timestamp}.txt"
+    print(log_file_name)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
     # Full path to the log file
-    log_filepath = os.path.join(log_dir, log_filename)
+    log_filepath = os.path.join(log_dir, log_file_name)
 
     # Write log to file
     with open(log_filepath, 'w') as log_file:
@@ -233,6 +237,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.weights, opt.single_cls, opt.evolve, opt.data, opt.cfg, \
         opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze
     callbacks.run('on_pretrain_routine_start')
+
+    ## save log info into the file
+    log_execution_details(opt)
 
     # Directories
     w = save_dir / 'weights'  # weights dir
@@ -444,7 +451,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     stopper, stop = EarlyStopping(patience=opt.patience), False
     getloss = SelfDistLoss(model,teacher_model,device)
     
-    # compute_loss = ComputeLoss(model)  # init loss class
+    compute_loss = ComputeLoss(model)  # init loss class
     # teacher_compute_loss=TeacherComputeLoss(teacher_model)
     callbacks.run('on_train_start')
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
@@ -859,5 +866,4 @@ def run(**kwargs):
 
 if __name__ == '__main__':
     opt = parse_opt()
-    log_execution_details(opt)
     main(opt)

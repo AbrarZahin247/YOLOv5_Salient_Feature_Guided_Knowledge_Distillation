@@ -61,7 +61,7 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
 # from utils.loss import ComputeLoss
-from utils.loss_without_tf import ComputeLoss
+from utils.ult_loss import ComputeLoss
 # from utils.smoothL1_salient_guide_kd_loss import NetwithLoss
 # from utils.loss_self_distillation_aug_27 import SelfDistLoss
 from utils.loss_self_distillation_feature_loss_aug_31 import SelfDistLoss
@@ -75,9 +75,9 @@ from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, select_devi
                                smart_resume, torch_distributed_zero_first)
 
 ## for windows only
-# import pathlib
-# temp = pathlib.PosixPath
-# pathlib.PosixPath = pathlib.WindowsPath
+import pathlib
+temp = pathlib.PosixPath
+pathlib.PosixPath = pathlib.WindowsPath
 
 
 
