@@ -10,6 +10,6 @@ python train_self_dist_complemnetary_distillation_smoothl1loss_aug_28.py --data 
 ================================
 python train_self_dist_dualloss_aug_27.py --data custom_data2.yaml --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --teacher_weight yolov5l_ep20_map_0_7_640.pt --epochs 50 --batch-size 64 --imgsz 640 --device 1
 =======================================
-python train_salient_guide_kd_aug_31.py --data custom_data.yaml --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --teacher_weight yolov5l_ep20_map_0_7_640.pt --epochs 50 --batch-size 18 --imgsz 640 --device 0
+python train_salient_guide_kd_aug_31.py --data custom_data.yaml --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --teacher_weight yolov5l_ep20_map_0_7_640.pt --epochs 50 --imgsz 640 --batch-size 18 --device 0
 
 
