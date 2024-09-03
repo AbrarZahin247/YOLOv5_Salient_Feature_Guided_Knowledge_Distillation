@@ -526,7 +526,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
             # Forward
 
-            with torch.amp.autocast(amp):
+            with torch.amp.autocast(device_type='cuda'):
                 targets = targets.to(device)
                 batch_size, _, img_w, img_h = imgs.size()
                 gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
