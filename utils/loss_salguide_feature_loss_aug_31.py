@@ -7,37 +7,7 @@ from utils.ult_loss import ComputeLoss
 from utils.metrics import bbox_iou
 from utils.torch_utils import de_parallel
 
-def transform_tensor(student_tensor, teacher_tensor):
-    """
-    Transforms a tensor to a target size by truncating excess elements or padding with zeros.
 
-    Args:
-        a (torch.Tensor): Input tensor of shape [batch_size, current_size, features].
-        target_size (int): The target size for the second dimension.
-
-    Returns:
-        torch.Tensor: Transformed tensor of shape [batch_size, target_size, features].
-    """
-    # print(student_tensor.shape)
-    # print(teacher_tensor.shape)
-    
-    ## teacher tensor shape
-    # t_batch_size, t_anchors,t_gridx,t_gridy,t_features=teacher_tensor.shape
-    t_batch_size, t_intermediate,t_features=teacher_tensor.shape
-    # teacher_intermediate_feat=t_anchors*t_gridx*t_gridy
-    teacher_3d = teacher_tensor.view(t_batch_size, -1, t_features)
-    
-    ## student
-    batch_size, anchors,gridx,gridy, features = student_tensor.shape
-    student_intermediate_feat=anchors*gridx*gridy
-    student_3d = student_tensor.view(batch_size, -1, features)
-    # print(student_intermediate_feat,teacher_intermediate_feat)
-    if(t_intermediate>student_intermediate_feat):
-        student_like_teacher_zero_tensor = torch.zeros(t_batch_size, t_intermediate,t_features, device=student_tensor.device, dtype=student_tensor.dtype)  # 6000 = 25200 - 19200
-        student_like_teacher_zero_tensor[:, :student_intermediate_feat, :] = student_3d
-        # print(student_like_teacher_zero_tensor.shape)
-        return student_like_teacher_zero_tensor,teacher_3d
-    return None
 
 
 def show_all_images_from_batch(images, delay=1):
@@ -75,8 +45,39 @@ def show_all_images_from_batch(images, delay=1):
     # Optionally, destroy all windows at the end
     cv2.destroyAllWindows()
 
+def transform_tensor(student_tensor, teacher_tensor):
+    """
+    Transforms a tensor to a target size by truncating excess elements or padding with zeros.
 
-class SelfDistLoss(torch.nn.Module):
+    Args:
+        a (torch.Tensor): Input tensor of shape [batch_size, current_size, features].
+        target_size (int): The target size for the second dimension.
+
+    Returns:
+        torch.Tensor: Transformed tensor of shape [batch_size, target_size, features].
+    """
+    # print(student_tensor.shape)
+    # print(teacher_tensor.shape)
+    
+    ## teacher tensor shape
+    # t_batch_size, t_anchors,t_gridx,t_gridy,t_features=teacher_tensor.shape
+    t_batch_size, t_intermediate,t_features=teacher_tensor.shape
+    # teacher_intermediate_feat=t_anchors*t_gridx*t_gridy
+    teacher_3d = teacher_tensor.view(t_batch_size, -1, t_features)
+    
+    ## student
+    batch_size, anchors,gridx,gridy, features = student_tensor.shape
+    student_intermediate_feat=anchors*gridx*gridy
+    student_3d = student_tensor.view(batch_size, -1, features)
+    # print(student_intermediate_feat,teacher_intermediate_feat)
+    if(t_intermediate>student_intermediate_feat):
+        student_like_teacher_zero_tensor = torch.zeros(t_batch_size, t_intermediate,t_features, device=student_tensor.device, dtype=student_tensor.dtype)  # 6000 = 25200 - 19200
+        student_like_teacher_zero_tensor[:, :student_intermediate_feat, :] = student_3d
+        # print(student_like_teacher_zero_tensor.shape)
+        return student_like_teacher_zero_tensor,teacher_3d
+    return None
+
+class SalientDistillLoss(torch.nn.Module):
     def __init__(self, student,teacher, device):
         super().__init__()
         self.student = student.to(device)

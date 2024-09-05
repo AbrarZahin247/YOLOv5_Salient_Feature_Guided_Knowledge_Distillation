@@ -64,7 +64,7 @@ from utils.ult_loss import ComputeLoss
 # from utils.loss_without_tf import ComputeLoss
 # from utils.smoothL1_salient_guide_kd_loss import NetwithLoss
 # from utils.loss_self_distillation_aug_27 import SelfDistLoss
-from utils.loss_salguide_feature_loss_aug_31 import SelfDistLoss
+from utils.loss_salguide_feature_loss_sept_5 import SalientDistillLoss
 from utils.cbam_multiply import CBAM
 
 
@@ -450,7 +450,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = torch.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
-    getloss = SelfDistLoss(model,teacher_model,device)
+    getloss = SalientDistillLoss(model,teacher_model,device)
     
     compute_loss = ComputeLoss(model)  # init loss class
     # teacher_compute_loss=TeacherComputeLoss(teacher_model)
