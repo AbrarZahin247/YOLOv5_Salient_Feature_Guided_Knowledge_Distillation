@@ -64,7 +64,8 @@ from utils.ult_loss import ComputeLoss
 # from utils.loss_without_tf import ComputeLoss
 # from utils.smoothL1_salient_guide_kd_loss import NetwithLoss
 # from utils.loss_self_distillation_aug_27 import SelfDistLoss
-from utils.loss_salguide_feature_loss_sept_5 import SalientDistillLoss
+# from utils.loss_salguide_feature_loss_sept_5 import SalientDistillLoss
+from utils.loss_salguide_feature_loss_sept_9_dynamic_dist_factor import SalientDistillLoss
 from utils.cbam_multiply import CBAM
 
 
@@ -75,9 +76,9 @@ from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, select_devi
                                smart_resume, torch_distributed_zero_first)
 
 ## for windows only
-# import pathlib
-# temp = pathlib.PosixPath
-# pathlib.PosixPath = pathlib.WindowsPath
+import pathlib
+temp = pathlib.PosixPath
+pathlib.PosixPath = pathlib.WindowsPath
 
 
 
@@ -122,8 +123,8 @@ def log_execution_details(args):
     # Ensure the log_files directory exists
     ## save info
     log_dir = "log_files"
-    # log_file_name=opt.save_dir.replace("\\","_")
-    log_file_name=opt.save_dir.replace("/","_")
+    log_file_name=opt.save_dir.replace("\\","_")
+    # log_file_name=opt.save_dir.replace("/","_")
     log_file_p=f"log_{log_file_name}_{timestamp}.txt"
     print(log_file_p)
     if not os.path.exists(log_dir):
@@ -594,6 +595,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             stop = stopper(epoch=epoch, fitness=fi)  # early stop check
             if fi > best_fitness:
                 best_fitness = fi
+            getloss.update_map50(results[2])
             log_vals = list(mloss) + list(results) + lr
             callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)
 
