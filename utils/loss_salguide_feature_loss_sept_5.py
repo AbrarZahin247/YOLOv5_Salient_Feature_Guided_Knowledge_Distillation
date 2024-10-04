@@ -20,25 +20,43 @@ def show_all_images_from_batch(images, delay=1):
     show_all_images_from_batch(images, delay=1)
     """
     # Loop through each image in the batch
-    for i in range(images.size(0)):
-        # Extract the i-th image from the batch
-        image = images[i]  # Shape is [3, 640, 640] assuming input shape [60, 3, 640, 640]
+    i=2
+    image = images[i]  # Shape is [3, 640, 640] assuming input shape [60, 3, 640, 640]
 
-        # Convert from PyTorch tensor to numpy array and transpose to HWC format
-        image = image.permute(1, 2, 0).cpu().numpy()  # Shape is now [640, 640, 3]
+    # Convert from PyTorch tensor to numpy array and transpose to HWC format
+    image = image.permute(1, 2, 0).cpu().numpy()  # Shape is now [640, 640, 3]
 
-        # Convert the image from range [0, 1] to [0, 255] if needed
-        # Assuming image tensor values are in range [0, 1]
-        image = (image * 255).astype(np.uint8)
+    # Convert the image from range [0, 1] to [0, 255] if needed
+    # Assuming image tensor values are in range [0, 1]
+    image = (image * 255).astype(np.uint8)
 
-        # Display the image using cv2
-        cv2.imshow(f'Image {i+1}', image)
+    # Display the image using cv2
+    cv2.imshow(f'Image {i+1}', image)
 
-        # Wait for the specified delay (converted to milliseconds)
-        cv2.waitKey(delay * 1000)
+    # Wait for the specified delay (converted to milliseconds)
+    cv2.waitKey(delay * 1000)
 
-        # Destroy the window to prepare for the next image
-        cv2.destroyWindow(f'Image {i+1}')
+    # Destroy the window to prepare for the next image
+    cv2.destroyWindow(f'Image {i+1}')
+    # for i in range(images.size(0)):
+    #     # Extract the i-th image from the batch
+    #     image = images[i]  # Shape is [3, 640, 640] assuming input shape [60, 3, 640, 640]
+
+    #     # Convert from PyTorch tensor to numpy array and transpose to HWC format
+    #     image = image.permute(1, 2, 0).cpu().numpy()  # Shape is now [640, 640, 3]
+
+    #     # Convert the image from range [0, 1] to [0, 255] if needed
+    #     # Assuming image tensor values are in range [0, 1]
+    #     image = (image * 255).astype(np.uint8)
+
+    #     # Display the image using cv2
+    #     cv2.imshow(f'Image {i+1}', image)
+
+    #     # Wait for the specified delay (converted to milliseconds)
+    #     cv2.waitKey(delay * 1000)
+
+    #     # Destroy the window to prepare for the next image
+    #     cv2.destroyWindow(f'Image {i+1}')
 
     # Optionally, destroy all windows at the end
     cv2.destroyAllWindows()
@@ -83,9 +101,12 @@ class SalientDistillLoss(nn.Module):
         self.teacher = teacher.to(device)
         self.device = device
         self.sl1 = nn.SmoothL1Loss()
+        self.mse = nn.MSELoss()
 
     @torch.cuda.amp.autocast()  # For automatic mixed precision (reduce memory usage)
     def forward(self, imgs, targets, gt_masks):
+        # show_all_images_from_batch(imgs,delay=10)
+
         loss_factor = 1e-2
         inv_masks = 1 - gt_masks
         
@@ -111,7 +132,8 @@ class SalientDistillLoss(nn.Module):
         # Compute the loss
         compute_loss = ComputeLoss(self.student)
         loss, loss_items = compute_loss(pred_student, targets)  # scaled by batch_size
-        loss_smoothL1 = self.sl1(salient_feature_teacher, salient_feature_student)  # scaled by batch_size
+        # loss_smoothL1 = self.sl1(salient_feature_teacher, salient_feature_student)  # scaled by batch_size
+        loss_smoothL1 = self.mse(salient_feature_teacher, salient_feature_student)  # scaled by batch_size
         
         # Combine losses
         return loss + loss_smoothL1, loss_items

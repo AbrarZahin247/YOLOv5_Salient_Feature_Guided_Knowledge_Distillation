@@ -122,8 +122,8 @@ def log_execution_details(args):
     # Ensure the log_files directory exists
     ## save info
     log_dir = "log_files"
-    # log_file_name=opt.save_dir.replace("\\","_")
-    log_file_name=opt.save_dir.replace("/","_")
+    log_file_name=opt.save_dir.replace("\\","_")
+    # log_file_name=opt.save_dir.replace("/","_")
     log_file_p=f"log_{log_file_name}_{timestamp}.txt"
     print(log_file_p)
     if not os.path.exists(log_dir):
@@ -543,7 +543,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     loss *= 4.
 
             # # Backward
-            scaler.scale(loss).backward()
+            # scaler.scale(loss).backward()
 
             # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
             if ni - last_opt_step >= accumulate:
