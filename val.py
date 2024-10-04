@@ -48,9 +48,9 @@ from utils.torch_utils import select_device, smart_inference_mode
 
 
 ## for windows only
-import pathlib
-temp = pathlib.PosixPath
-pathlib.PosixPath = pathlib.WindowsPath
+# import pathlib
+# temp = pathlib.PosixPath
+# pathlib.PosixPath = pathlib.WindowsPath
 
 
 
