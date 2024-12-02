@@ -1,1 +1,10 @@
 python train_with_multiplied_attention_no_tf_background_salient_with_kd.py --data custom_data.yaml --teacher_weight yolov5l_ep20_map_0_7_640.pt --weight '' --cfg 'models/yolov5n_light_attention.yaml' --epochs 50 --batch-size 16 --imgsz 640
+-----------------------------------------------------------------------------------------------
+python train_salient_guide_mul_attention_new_distillation_loss.py --data custom_data.yaml --teacher_weight yolov5l_ep20_map_0_7_640.pt --weight '' --cfg 'models/yolov5n_light_attention.yaml' --epochs 50 --batch-size 16 --imgsz 640
+
+===================================================================================================================================
+===================================================================================================================================
+
+python val.py --weights yolov5_light_attention_ep50.pt --data custom_data.yaml --batch-size 8 --imgsz 640 --device 0
+-----------------------------------------------------------------------------------------------------------------------------
+python val.py --weights yolov5_light_attention_ultralytics_ep50.pt --data custom_data.yaml --batch-size 12 --imgsz 640 --device 0
