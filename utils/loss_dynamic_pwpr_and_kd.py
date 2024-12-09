@@ -87,31 +87,41 @@ class SalientDistillLoss(nn.Module):
     @torch.cuda.amp.autocast()  # For automatic mixed precision (reduce memory usage)
     def forward(self, imgs, targets, gt_masks):
         # loss_factor = 1e-2
-        inv_masks = 1 - gt_masks
-        
-        # Process background images by applying inverted masks
-        bg_images = imgs * inv_masks
-        imgs, bg_images, targets = imgs.to(self.device), bg_images.to(self.device), targets.to(self.device)
+        if(gt_masks is not None):
+            inv_masks = 1 - gt_masks
+            bg_images = imgs * inv_masks
+            bg_images=bg_images.to(self.device)
+        imgs, targets = imgs.to(self.device), targets.to(self.device)
 
         # Forward pass for student and teacher models
         pred_student = self.student(imgs)
-        pred_student_bg = self.student(bg_images)
-        pred_teacher = self.teacher(imgs)
-        pred_teacher_bg = self.teacher(bg_images)
-        
-        # Calculate salient features for student and teacher
-        salient_feature_student = pred_student[0] - pred_student_bg[0]
-        salient_feature_teacher = pred_teacher[0] - pred_teacher_bg[0]
-        
-        # Adjust the shape of the student tensor to match the teacher tensor
-        transformed_tensors = transform_tensor(salient_feature_student, salient_feature_teacher)
-        if transformed_tensors is not None:
-            salient_feature_student, salient_feature_teacher = transformed_tensors
 
-        # Compute the loss
+        ## compute loss of student
         compute_loss = ComputeLoss(self.student)
         loss, loss_items = compute_loss(pred_student, targets)  # scaled by batch_size
-        loss_smoothL1 = self.sl1(salient_feature_teacher, salient_feature_student)  # scaled by batch_size
+
+        if(gt_masks is not None):
+            pred_teacher = self.teacher(imgs)
+            pred_student_bg = self.student(bg_images)
+            pred_teacher_bg = self.teacher(bg_images)
+
+            salient_feature_student = pred_student[0] - pred_student_bg[0]
+            salient_feature_teacher = pred_teacher[0] - pred_teacher_bg[0]
+
+            transformed_tensors = transform_tensor(salient_feature_student, salient_feature_teacher)
+            if transformed_tensors is not None:
+                salient_feature_student, salient_feature_teacher = transformed_tensors
+            loss_smoothL1 = self.sl1(salient_feature_teacher, salient_feature_student)  # scaled by batch_size
+            loss=loss+loss_smoothL1
+        # Calculate salient features for student and teacher
+        
+        
+        # Adjust the shape of the student tensor to match the teacher tensor
+        
+
+        # Compute the loss
+        
+        
         
         # Combine losses
-        return loss + loss_smoothL1, loss_items
+        return loss, loss_items

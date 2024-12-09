@@ -64,8 +64,10 @@ from utils.ult_loss import ComputeLoss
 # from utils.loss_without_tf import ComputeLoss
 # from utils.smoothL1_salient_guide_kd_loss import NetwithLoss
 # from utils.loss_self_distillation_aug_27 import SelfDistLoss
-from utils.loss_salguide_feature_loss_sept_5 import SalientDistillLoss
-from utils.cbam_multiply import CBAM
+# from utils.loss_salguide_feature_loss_sept_5 import SalientDistillLoss
+from utils.loss_dynamic_pwpr_and_kd import SalientDistillLoss
+import nn.utils.prune as prune
+# from utils.cbam_multiply import CBAM
 
 
 
@@ -85,6 +87,23 @@ LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable
 RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
 GIT_INFO = check_git_info()
+
+def pruned_the_model(student_model,prune_percentage=0.8):
+    # Iterate over the modules in the YOLOv5 model
+    for name, module in student_model.named_modules():
+        # Check for convolutional layers (Conv2d layers)
+        if isinstance(module, torch.nn.Conv2d):
+            prune.l1_unstructured(module, name="weight", amount=prune_percentage)
+            print("=======================================================")
+            print(f"Pruned {prune_percentage * 100}% of weights in {name}")
+            print("=======================================================")
+    return student_model
+
+
+
+
+    prune.random_unstructured(student_model.conv1, name="weight", amount=0.3)
+    return prune()
 
 
 def log_execution_details(args):
@@ -302,7 +321,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
     amp = check_amp(model)  # check AMP
 
-    if opt.teacher_weight:
+    if opt.teacher_weight!='':
         teacher_weight = opt.teacher_weight
         with torch_distributed_zero_first(LOCAL_RANK):
             teacher_weight = attempt_download(teacher_weight)  # download if not found locally
@@ -359,14 +378,14 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             'See Multi-GPU Tutorial at https://docs.ultralytics.com/yolov5/tutorials/multi_gpu_training to get started.'
         )
         model = torch.nn.DataParallel(model)
-        if opt.teacher_weight:
+        if opt.teacher_weight!='':
             teacher_model = torch.nn.DataParallel(teacher_model)
 
     # SyncBatchNorm
     if opt.sync_bn and cuda and RANK != -1:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
 
-        if opt.teacher_weight:
+        if opt.teacher_weight!='':
             teacher_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(teacher_model).to(device)
         LOGGER.info('Using SyncBatchNorm()')
 
@@ -416,7 +435,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     # DDP mode
     if cuda and RANK != -1:
         model = smart_DDP(model)
-        if opt.teacher_weight:
+        if opt.teacher_weight!='':
             teacher_model = smart_DDP(teacher_model)
 
     # Model attributes
@@ -430,7 +449,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
     model.names = names
     
-    if opt.teacher_weight:
+    if opt.teacher_weight!='':
         teacher_model.nc = nc  # attach number of classes to model
         teacher_model.hyp = hyp  # attach hyperparameters to model
         teacher_model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
@@ -450,7 +469,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scheduler.last_epoch = start_epoch - 1  # do not move
     scaler = torch.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
-    getloss = SalientDistillLoss(model,teacher_model,device)
+    getloss = SalientDistillLoss(model,teacher_model,device,opt.pruning)
     
     compute_loss = ComputeLoss(model)  # init loss class
     # teacher_compute_loss=TeacherComputeLoss(teacher_model)
@@ -461,7 +480,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 f'Starting training for {epochs} epochs...')
                 
     
-    if opt.teacher_weight:
+    if opt.teacher_weight!='':
         dump_image = torch.zeros((1, 3, opt.imgsz, opt.imgsz), device=device)
         targets = torch.Tensor([[0, 0, 0, 0, 0, 0]]).to(device)
         features= model(dump_image, target=targets)  # forward
@@ -471,15 +490,19 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         
         _,student_channel,student_out_size,_,_ = features[0].shape
         _,teacher_channel,teacher_out_size,_,_ = teacher_feature[0].shape
-        stu_feature_adapt = nn.Sequential(nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
+        # stu_feature_adapt = nn.Sequential(nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
         # stu_feature_adapt = nn.Sequential(nn.Linear(student_channel*student_out_size*student_out_size, teacher_channel*teacher_out_size*teacher_out_size), nn.ReLU()).to(device)
         # stu_feature_adapt = nn.Sequential(CBAM(student_channel,r=2),nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
                   
                 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         callbacks.run('on_train_epoch_start')
+        ## check if the model is needed to be pruned......
+        if(epoch==opt.prune_epoch-1 and opt.prune_perc>0.01):
+            model=pruned_the_model(model,opt.prune_perc)
+
         model.train()
-        if opt.teacher_weight:
+        if opt.teacher_weight!='':
             teacher_model.eval()
 
         # Update image weights (optional, single-GPU only)
@@ -529,7 +552,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             with torch.amp.autocast(device_type='cuda'):
                 targets = targets.to(device)
                 batch_size, _, img_w, img_h = imgs.size()
-                gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
+                gt_mask=None
+                if opt.teacher_weight!='':
+                    gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
                 
                 ## Make the all the zeros to 255
                 # gt_images[gt_images == 0] = 1
@@ -669,6 +694,8 @@ def parse_opt(known=False):
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=100, help='total training epochs')
+    parser.add_argument('--prune_epoch', type=int, default=0, help='total training epochs')
+    parser.add_argument('--prune_perc', type=float, default=0.0, help='total percentage to make model\'s weight to zero')
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
