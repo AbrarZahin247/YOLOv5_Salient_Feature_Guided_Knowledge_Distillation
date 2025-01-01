@@ -43,6 +43,7 @@ coco/
 coco128/
 VOC/
 Test_Okutama_Dataset/
+Okutama_Dataset_15_December/
 
 # MATLAB GitIgnore -----------------------------------------------------------------------------------------------------
 *.m~

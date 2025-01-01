@@ -80,14 +80,15 @@ class SalientDistillLoss(nn.Module):
     def __init__(self, student, teacher, device):
         super().__init__()
         self.student = student.to(device)
-        self.teacher = teacher.to(device)
+        self.teacher = teacher.to(device) if teacher is not None else teacher
         self.device = device
         self.sl1 = nn.SmoothL1Loss()
 
     @torch.cuda.amp.autocast()  # For automatic mixed precision (reduce memory usage)
     def forward(self, imgs, targets, gt_masks):
         # loss_factor = 1e-2
-        if(gt_masks is not None):
+        allow_kd=gt_masks is not None and self.teacher is not None
+        if(allow_kd):
             inv_masks = 1 - gt_masks
             bg_images = imgs * inv_masks
             bg_images=bg_images.to(self.device)
@@ -100,7 +101,7 @@ class SalientDistillLoss(nn.Module):
         compute_loss = ComputeLoss(self.student)
         loss, loss_items = compute_loss(pred_student, targets)  # scaled by batch_size
 
-        if(gt_masks is not None):
+        if(allow_kd):
             pred_teacher = self.teacher(imgs)
             pred_student_bg = self.student(bg_images)
             pred_teacher_bg = self.teacher(bg_images)
@@ -113,15 +114,5 @@ class SalientDistillLoss(nn.Module):
                 salient_feature_student, salient_feature_teacher = transformed_tensors
             loss_smoothL1 = self.sl1(salient_feature_teacher, salient_feature_student)  # scaled by batch_size
             loss=loss+loss_smoothL1
-        # Calculate salient features for student and teacher
-        
-        
-        # Adjust the shape of the student tensor to match the teacher tensor
-        
 
-        # Compute the loss
-        
-        
-        
-        # Combine losses
         return loss, loss_items

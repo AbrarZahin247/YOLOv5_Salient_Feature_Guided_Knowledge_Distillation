@@ -1,15 +1,8 @@
-python train_with_multiplied_attention_no_tf_background_salient_with_kd.py --data custom_data.yaml --teacher_weight yolov5l_ep20_map_0_7_640.pt --weight '' --cfg 'models/yolov5n_light_attention.yaml' --epochs 50 --batch-size 16 --imgsz 640
-
-============================
-python train_odkd_salient_feat_guide.py --data custom_data2.yaml --teacher_weight yolov5l_ep20_map_0_7_640.pt --weight '' --cfg models/yolov5n_light_attention.yaml --epochs 50 --batch-size 16 --imgsz 640
-============================
-python train_salguide_smoothl1loss.py --data custom_data.yaml --teacher_weight yolov5l_ep20_map_0_7_640.pt --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --epochs 50 --batch-size 24  --imgsz 640 --device 0
-
-================================
-python train_self_dist_complemnetary_distillation_smoothl1loss_aug_28.py --data custom_data.yaml --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --epochs 50 --batch-size 64  --imgsz 640 --device 0
-================================
-python train_self_dist_dualloss_aug_27.py --data custom_data2.yaml --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --teacher_weight yolov5l_ep20_map_0_7_640.pt --epochs 50 --batch-size 64 --imgsz 640 --device 1
 =======================================
-python train_salient_guide_kd_aug_31.py --data custom_data.yaml --weight pruned_normal_10ep_trained_yolov5n_70perc_pruned_0_7.pt --teacher_weight yolov5l_ep20_map_0_7_640.pt --epochs 50 --imgsz 640 --batch-size 18 --device 0
+python train.py --data custom_data.yaml --weight '' --cfg yolov5n.yaml --epochs 50 --imgsz 640 --batch-size 40 --device 0
+=======================================
+python train.py --data custom_data.yaml --weight 'pruned_normal_10ep_trained_yolov5n_80perc_pruned.pt' --cfg '' --epochs 40 --imgsz 640 --batch-size 40 --device 0
+=======================================
+python train_dynamic.py --data custom_data.yaml --weights '' --cfg yolov5n.yaml --epochs 50 --prune_epoch 10 --prune_perc 0.8 --batch-size 40 --device 0
 
 
