@@ -39,9 +39,9 @@ from torch.optim import lr_scheduler
 from tqdm import tqdm
 
 ## for windows only
-import pathlib
-temp = pathlib.PosixPath
-pathlib.PosixPath = pathlib.WindowsPath
+# import pathlib
+# temp = pathlib.PosixPath
+# pathlib.PosixPath = pathlib.WindowsPath
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
