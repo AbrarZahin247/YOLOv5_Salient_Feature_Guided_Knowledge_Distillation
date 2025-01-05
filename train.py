@@ -31,6 +31,7 @@ except ImportError:
     comet_ml = None
 
 import numpy as np
+import shutil
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -370,6 +371,23 @@ def train(hyp, opt, device, callbacks):
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         callbacks.run("on_train_epoch_start")
         model.train()
+
+        ## added code to save directory after 10 epochs to ensure proper save of the model
+        if(epoch>=9 and (epoch-9) % 10 == 0):
+            try:
+                current_datetime = datetime.datetime.now()
+                foldername = current_datetime.strftime("%Y%m%d_%H%M%S")
+                dest_dir=os.path.join(save_dir,foldername)
+
+                if not os.path.exists(dest_dir):
+                    os.makedirs(dest_dir)
+                    print(f"Directory {dest_dir} created.")
+
+                shutil.copytree(save_dir,dest_dir)
+                print(f"Directory copied from {save_dir} to {dest_dir}")
+            except Exception as e:
+                print(f"Error: {e}")
+
 
         # Update image weights (optional, single-GPU only)
         if opt.image_weights:
