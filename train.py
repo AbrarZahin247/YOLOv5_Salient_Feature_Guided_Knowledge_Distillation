@@ -358,7 +358,7 @@ def train(hyp, opt, device, callbacks):
     maps = np.zeros(nc)  # mAP per class
     results = (0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     scheduler.last_epoch = start_epoch - 1  # do not move
-    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    scaler = torch.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
     compute_loss = ComputeLoss(model)  # init loss class
     callbacks.run("on_train_start")
@@ -373,9 +373,9 @@ def train(hyp, opt, device, callbacks):
         model.train()
 
         ## added code to save directory after 10 epochs to ensure proper save of the model
-        if(epoch>=9 and (epoch-9) % 10 == 0):
+        if(epoch>=9 and (epoch % 10 == 0)):
             try:
-                current_datetime = datetime.datetime.now()
+                current_datetime = datetime.now()
                 foldername = current_datetime.strftime("%Y%m%d_%H%M%S")
                 dest_dir=os.path.join(save_dir,foldername)
 
@@ -432,7 +432,8 @@ def train(hyp, opt, device, callbacks):
                     imgs = nn.functional.interpolate(imgs, size=ns, mode="bilinear", align_corners=False)
 
             # Forward
-            with torch.cuda.amp.autocast(amp):
+            # with torch.amp.autocast(amp):
+            with torch.amp.autocast('cuda', enabled=True):
                 pred = model(imgs)  # forward
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
                 if RANK != -1:
