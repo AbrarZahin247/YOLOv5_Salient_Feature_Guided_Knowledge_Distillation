@@ -5,9 +5,11 @@ python train.py --data custom_data.yaml --weight '' --cfg yolov5n_light.yaml --e
 =======================================
 python train.py --data custom_data.yaml --weight runs/train/exp3/weights/best.pt --epochs 50 --imgsz 640 --batch-size 40 --device 0
 =======================================
-python train.py --data custom_data.yaml --weight 'pruned_normal_10ep_trained_yolov5n_80perc_pruned.pt' --cfg '' --epochs 40 --imgsz 640 --batch-size 40 --device 0
+python train.py --data custom_data.yaml --weight pruned_normal_10ep_trained_yolov5n_80perc_pruned.pt --epochs 40 --imgsz 640 --batch-size 40 --device 0
 -------------------------------------
-python train.py --data custom_data.yaml --weight pwpr_80perc_retrained_10ep_yolov5n_lite_mod.pt --cfg '' --epochs 40 --imgsz 640 --batch-size 40 --device 0
+python train.py --data custom_data.yaml --weight pruned_normal_10ep_trained_yolov5n_80perc_pruned.pt --epochs 5 --imgsz 640 --batch-size 40 --device 0
+-------------------------------------
+python train.py --data custom_data.yaml --weight pwpr_80perc_retrained_10ep_yolov5n_lite_mod.pt --epochs 40 --imgsz 640 --batch-size 40 --device 0
 =======================================
 python train_dynamic.py --data custom_data.yaml --weights '' --cfg yolov5n.yaml --epochs 50 --prune_epoch 10 --prune_perc 0.8 --batch-size 40 --device 0
 
