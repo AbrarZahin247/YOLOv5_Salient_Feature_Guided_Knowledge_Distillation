@@ -12,7 +12,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Load and prune YOLO model")
     parser.add_argument('--saved_name', type=str, default="pruned_model", help="Path to model weights or a URL to pretrained model")
     parser.add_argument('--weights', type=str, required=True, help="Path to model weights or a URL to pretrained model")
-    parser.add_argument('--device', type=str, default='cuda', help="Device to run the model on (cuda or cpu)")
+    # parser.add_argument('--device', type=str, default='cuda', help="Device to run the model on (cuda or cpu)")
     parser.add_argument('--cfg', type=str, default=None, help="Path to the config file (optional)")
     parser.add_argument('--nc', type=int, default=80, help="Number of classes")
     parser.add_argument('--hyp', type=str, default=None, help="Path to the hyperparameters file (optional)")
@@ -20,16 +20,32 @@ def parse_args():
     parser.add_argument('--prune_amount', type=float, default=0.2, help="Amount of pruning (fraction)")
     return parser.parse_args()
 
+def calculate_zero_weights_percentage(model):
+    # Get all the weights from the model (parameters)
+    total_weights = 0
+    zero_weights = 0
+
+    # Iterate through all model parameters (weights)
+    for param in model.parameters():
+        # Flatten the parameter tensor and count the zero elements
+        total_weights += param.numel()
+        zero_weights += (param == 0).sum().item()
+
+    # Calculate the percentage of zero weights
+    zero_percentage = (zero_weights / total_weights) * 100
+    return zero_percentage
+
+
 def main():
     # Parse arguments
     args = parse_args()
 
     # Initialize device
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-
+    # device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    device="cpu"
     # Check if pretrained weights file
     pretrained = args.weights.endswith(".pt")
-    
+    print(f"Loading and pruning the model...{pretrained}")
     if pretrained:
         # Handle distributed training (if applicable)
         # if args.local_rank != -1:
@@ -42,7 +58,7 @@ def main():
         ckpt = torch.load(args.weights, map_location="cpu")  # Load checkpoint to CPU
         
         # Create model from the config or checkpoint YAML
-        model = Model(cfg=args.cfg or ckpt["model"].yaml, ch=3, nc=args.nc, anchors=None).to(device)
+        model = Model(ckpt["model"].yaml, ch=3, nc=args.nc, anchors=None).to(device)
         
         # Exclude 'anchor' key if anchors are provided
         exclude = ["anchor"] if (args.cfg or args.hyp) and not args.resume else []
@@ -75,8 +91,13 @@ def main():
                     # "git": GIT_INFO,  # {remote, branch, commit} if a git repo
                     # "date": datetime.now().isoformat(),
                 }
+
+        # Calculate and print the percentage of zero weights
+        zero_percentage = calculate_zero_weights_percentage(model)
+        print(f"Percentage of zero weights: {zero_percentage:.2f}%")
+
         torch.save(ckpt, saved_path)        
-        print("Model pruned and saved successfully.")  
+        print(f"{args.prune_amount*100}% of the model pruned successfully.")
     else:
         print("Weights not in .pt format, skipping loading...")
 

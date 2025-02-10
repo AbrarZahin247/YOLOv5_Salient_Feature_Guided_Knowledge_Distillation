@@ -373,20 +373,24 @@ def train(hyp, opt, device, callbacks):
         model.train()
 
         ## added code to save directory after 10 epochs to ensure proper save of the model
-        if(epoch>=9 and (epoch % 10 == 0)):
-            try:
-                current_datetime = datetime.now()
-                foldername = current_datetime.strftime("%Y%m%d_%H%M%S")
-                dest_dir=os.path.join(save_dir,foldername)
+        # if(epoch>=9 and (epoch % 10 == 0)):
 
-                if not os.path.exists(dest_dir):
-                    os.makedirs(dest_dir)
-                    print(f"Directory {dest_dir} created.")
+        #  ###### the code below 379 to 392 for saving the model file after each 10 epochs uncomment those lines for saving the model after each 10 epochs
 
-                shutil.copytree(save_dir,dest_dir)
-                print(f"Directory copied from {save_dir} to {dest_dir}")
-            except Exception as e:
-                print(f"Error: {e}")
+        # if(epoch>=9 and (epoch % 10 == 0)):
+        #     try:
+        #         current_datetime = datetime.now()
+        #         foldername = current_datetime.strftime("%Y%m%d_%H%M%S")
+        #         dest_dir=os.path.join(save_dir,foldername)
+
+        #         # if not os.path.exists(dest_dir):
+        #         #     os.makedirs(dest_dir)
+        #         #     print(f"Directory {dest_dir} created.")
+
+        #         shutil.copytree(save_dir,dest_dir)
+        #         print(f"Directory copied from {save_dir} to {dest_dir}")
+        #     except Exception as e:
+        #         print(f"Error: {e}")
 
 
         # Update image weights (optional, single-GPU only)
