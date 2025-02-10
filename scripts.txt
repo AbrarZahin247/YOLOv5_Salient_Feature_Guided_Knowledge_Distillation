@@ -19,9 +19,6 @@ python train.py --data custom_data.yaml --weight pwpr_90perc_10ep_trained_yolov5
 python train.py --data custom_data.yaml --weight pwpr_70perc_10ep_trained_yolov5n_mod.pt --epochs 40 --imgsz 640 --batch-size 40 --device 0
 =======================================
 python train_dynamic.py --data custom_data.yaml --weights '' --cfg yolov5n.yaml --epochs 50 --prune_epoch 10 --prune_perc 0.8 --batch-size 40 --device 0
-
-
-
 =======================================
 python prune_and_save.py --saved_name pwpr_80perc_retrained_10ep_yolov5n_lite_mod --weights runs/train/exp6/weights/best.pt --prune_amount 0.8 --nc 5
 ---------------------------------------

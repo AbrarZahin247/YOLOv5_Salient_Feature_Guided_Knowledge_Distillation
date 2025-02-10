@@ -40,9 +40,9 @@ from torch.optim import lr_scheduler
 from tqdm import tqdm
 
 ## for windows only
-# import pathlib
-# temp = pathlib.PosixPath
-# pathlib.PosixPath = pathlib.WindowsPath
+import pathlib
+temp = pathlib.PosixPath
+pathlib.PosixPath = pathlib.WindowsPath
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -105,6 +105,118 @@ RANK = int(os.getenv("RANK", -1))
 WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 GIT_INFO = check_git_info()
 
+# import torch.nn.utils.prune as prune
+import matplotlib.pyplot as plt
+
+import os
+import torch
+import pandas as pd
+
+
+
+# import torch
+# import matplotlib.pyplot as plt
+# import numpy as np
+# from pathlib import Path
+
+
+def save_weight_distribution(epoch, model, file_dir):
+    """
+    Save weight distribution histograms for the model's weights.
+    
+    Parameters:
+        epoch (int): The current epoch number.
+        model (torch.nn.Module): The model to inspect.
+        file_dir (str): The directory where histograms will be saved.
+    """
+    # Ensure the save directory exists
+    file_dir=os.path.join(file_dir,"weight_distribution")
+    if not os.path.exists(file_dir):
+        os.makedirs(file_dir)
+
+    # Iterate over all model parameters (weights)
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            # Create histogram for weights
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.hist(param.detach().cpu().numpy().flatten(), bins=50)
+            ax.set_title(f"Weight Distribution: {name}")
+            ax.set_xlabel("Weight value")
+            ax.set_ylabel("Frequency")
+            
+            # Save the histogram
+            hist_filename = os.path.join(file_dir, f"epoch_{epoch}_{name.replace('/', '_')}_weight_histogram.png")
+            plt.savefig(hist_filename)
+            plt.close(fig)
+
+    print(f"Weight distribution saved for epoch {epoch} at {file_dir}")
+
+
+
+# def save_weight_distribution(epoch, model, file_dir):
+#     """
+#     Takes a YOLOv5 model and an epoch and saves the histogram of weights distribution to a file.
+    
+#     Args:
+#         epoch (int): The epoch number.
+#         model (torch.nn.Module): The YOLOv5 model.
+#         file_dir (str): The directory to save the histogram images.
+    
+#     Returns:
+#         None
+#     """
+#     weights = []
+    
+#     # Extract all weights from the model (including Conv2d, Linear, etc.)
+#     for name, param in model.named_parameters():
+#         if param.requires_grad:
+#             weights.append(param.data.cpu().numpy())
+    
+#     # Flatten the list of all weights
+#     weights = [w.flatten() for w in weights]
+#     all_weights = np.concatenate(weights)
+    
+#     # Create filename with epoch in the format "yolov5_weight_distribution_epoch_X.png"
+#     filename = f"yolov5_weight_distribution_epoch_{epoch}.png"
+#     file_dir=os.path.join(file_dir,"weight_distribution")
+#     file_path = Path(file_dir) / filename
+    
+#     # Plot histogram of weights
+#     plt.figure(figsize=(10, 6))
+#     plt.hist(all_weights, bins=10, color='blue', alpha=0.7)
+#     plt.title(f"YOLOv5 Weight Distribution at Epoch {epoch}")
+#     plt.xlabel("Weight values")
+#     plt.ylabel("Frequency")
+    
+#     # Save the plot to a file
+#     file_path.parent.mkdir(parents=True, exist_ok=True)  # Create the directory if it doesn't exist
+#     plt.savefig(file_path)
+#     plt.close()
+#     print(f"Histogram of weight distribution saved to {file_path}")
+
+
+## to save the gradflow
+# def save_grad_flow(named_parameters, epoch, save_dir):
+#     # Visualize gradient flow for each layer
+#     ave_grads = []
+#     layers = []
+#     for name, param in named_parameters:
+#         if param.grad is not None:
+#             ave_grads.append(param.grad.abs().mean().item())
+#             layers.append(name)
+    
+#     # Plot
+#     plt.figure(figsize=(12, 6))
+#     plt.barh(layers, ave_grads)
+#     plt.xlabel('Average Gradient')
+#     plt.title(f'Gradient Flow - Epoch {epoch}')
+    
+#     # Save the plot as an image
+#     saved_dir_path=os.path.join(save_dir,"grad_flow")
+#     if not os.path.exists(saved_dir_path):
+#         os.makedirs(saved_dir_path)
+#     plt.savefig(os.path.join(saved_dir_path, f'grad_flow_epoch_{epoch}.png'))
+#     plt.close()
 
 def train(hyp, opt, device, callbacks):
     """
@@ -391,6 +503,10 @@ def train(hyp, opt, device, callbacks):
         #         print(f"Directory copied from {save_dir} to {dest_dir}")
         #     except Exception as e:
         #         print(f"Error: {e}")
+        #         shutil.copytree(save_dir,dest_dir)
+        #         print(f"Directory copied from {save_dir} to {dest_dir}")
+        #     except Exception as e:
+        #         print(f"Error: {e}")
 
 
         # Update image weights (optional, single-GPU only)
@@ -447,6 +563,8 @@ def train(hyp, opt, device, callbacks):
 
             # Backward
             scaler.scale(loss).backward()
+
+            
 
             # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
             if ni - last_opt_step >= accumulate:
@@ -535,8 +653,12 @@ def train(hyp, opt, device, callbacks):
                 stop = broadcast_list[0]
         if stop:
             break  # must break all DDP ranks
+        
 
+        save_weight_distribution(epoch, model, file_dir=save_dir)
+        # save_grad_flow(model.named_parameters(), epoch, save_dir)
         # end epoch ----------------------------------------------------------------------------------------------------
+
     # end training -----------------------------------------------------------------------------------------------------
     if RANK in {-1, 0}:
         LOGGER.info(f"\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.")
