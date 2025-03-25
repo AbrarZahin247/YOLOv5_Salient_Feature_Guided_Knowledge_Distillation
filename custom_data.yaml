@@ -1,10 +1,10 @@
 
 # path: /home/mlrobotics/exp/YOLOv5_Ultralytics/Okutama_Train_Val_Test # dataset root dir
-path: ./Okutama_Dataset_15_December # dataset root dir
+path: ./Okutama_Dataset_23_March # dataset root dir
 # path: ./Okutama_Test # dataset root dir
 train: train/images
 val: val/images
-# test: test/images
+test: test/images
 
 names:
   0: walk
