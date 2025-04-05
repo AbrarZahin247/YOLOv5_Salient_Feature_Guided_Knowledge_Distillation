@@ -120,37 +120,57 @@ import pandas as pd
 # from pathlib import Path
 
 
-def save_weight_distribution(epoch, model, file_dir):
+def save_weight_distribution(epoch, model, file_dir, exclude_bias_bn=True):
     """
-    Save weight distribution histograms for the model's weights.
+    Save a combined weight distribution histogram for the model's weights for a single epoch.
     
     Parameters:
         epoch (int): The current epoch number.
         model (torch.nn.Module): The model to inspect.
-        file_dir (str): The directory where histograms will be saved.
+        file_dir (str): The directory where histograms and model weights will be saved.
+        exclude_bias_bn (bool): Whether to exclude biases and batch normalization parameters.
     """
-    # Ensure the save directory exists
-    file_dir=os.path.join(file_dir,"weight_distribution")
-    if not os.path.exists(file_dir):
-        os.makedirs(file_dir)
+    # Ensure the save directories exist
+    hist_dir = os.path.join(file_dir, "weight_distribution")
+    weight_dir = os.path.join(file_dir, "model_weights")
+    
+    for dir_path in [hist_dir, weight_dir]:
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+    
+    # List to collect all the weights
+    all_weights = []
 
     # Iterate over all model parameters (weights)
     for name, param in model.named_parameters():
         if param.requires_grad:
-            # Create histogram for weights
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.hist(param.detach().cpu().numpy().flatten(), bins=50)
-            ax.set_title(f"Weight Distribution: {name}")
-            ax.set_xlabel("Weight value")
-            ax.set_ylabel("Frequency")
-            
-            # Save the histogram
-            hist_filename = os.path.join(file_dir, f"epoch_{epoch}_{name.replace('/', '_')}_weight_histogram.png")
-            plt.savefig(hist_filename)
-            plt.close(fig)
+            # Exclude biases and batch normalization parameters if requested
+            if exclude_bias_bn and ('bias' in name or 'bn' in name):
+                continue
+            # Add the weights of this parameter to the list
+            all_weights.append(param.detach().cpu().numpy().flatten())
 
-    print(f"Weight distribution saved for epoch {epoch} at {file_dir}")
+    # Combine all weight values into one large list
+    all_weights = np.concatenate(all_weights)
 
+    # Create a combined histogram for all layers
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.hist(all_weights, bins=100, color='blue', alpha=0.7, log=True)  # Use log scale for y-axis
+    ax.set_title(f"Combined Weight Distribution: Epoch {epoch}")
+    ax.set_xlabel("Weight value")
+    ax.set_ylabel("Frequency (log scale)")
+
+    # Save the combined histogram
+    hist_filename = os.path.join(hist_dir, f"epoch_{epoch}_combined_weight_histogram.png")
+    plt.savefig(hist_filename)
+    plt.close(fig)
+
+    print(f"Weight distribution histogram for epoch {epoch} saved to {hist_filename}")
+
+    # Save the model's weights
+    weight_filename = os.path.join(weight_dir, f"epoch_{epoch}_model_weights.pth")
+    torch.save(model.state_dict(), weight_filename)
+    print(f"Model weights for epoch {epoch} saved to {weight_filename}")
 
 def train(hyp, opt, device, callbacks):
     """
