@@ -1,1 +1,20 @@
+path: ./Okutama_Dataset_23_March # dataset root dir
+# path: ./UAV_Drone_Action_26_April # dataset root dir
+train: train/images
+val: val/images
+test: test/images
 
+names:
+  0: punching
+  1: clapping
+  2: hitting_bottle
+  3: hitting_stick
+  4: jogging_f_b
+  5: jogging_side
+  6: kicking
+  7: running_f_b
+  8: running_side
+  9: stabbing
+  10: walking_f_b
+  11: walking_side
+  12: waving_hands
