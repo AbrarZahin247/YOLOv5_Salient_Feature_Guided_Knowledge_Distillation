@@ -1,5 +1,5 @@
-path: ./Okutama_Dataset_23_March # dataset root dir
-# path: ./UAV_Drone_Action_26_April # dataset root dir
+# path: ./Okutama_Dataset_23_March # dataset root dir
+path: ./UAV_Drone_Action_26_April # dataset root dir
 train: train/images
 val: val/images
 test: test/images
