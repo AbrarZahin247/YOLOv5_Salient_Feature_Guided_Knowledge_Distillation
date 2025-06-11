@@ -609,7 +609,7 @@ def train(hyp, opt, device, callbacks):
             break  # must break all DDP ranks
         
 
-        save_weight_distribution(epoch, model, file_dir=save_dir)
+        # save_weight_distribution(epoch, model, file_dir=save_dir)
         # save_grad_flow(model.named_parameters(), epoch, save_dir)
         # end epoch ----------------------------------------------------------------------------------------------------
 
