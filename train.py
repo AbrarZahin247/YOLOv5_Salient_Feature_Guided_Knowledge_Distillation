@@ -649,7 +649,7 @@ def train(hyp, opt, device, callbacks):
                     torch.save(ckpt, w / f"epoch{epoch}.pt")
                 del ckpt
                 callbacks.run("on_model_save", last, epoch, final_epoch, best_fitness, fi)
-            download_every_n_epochs(save_dir, epoch, interval=10, rank=RANK)
+            download_every_n_epochs(save_dir, epoch, interval=1, rank=RANK)
 
         # EarlyStopping
         if RANK != -1:  # if DDP training
