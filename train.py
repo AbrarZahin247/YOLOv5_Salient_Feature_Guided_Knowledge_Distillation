@@ -156,7 +156,7 @@ def download_every_n_epochs(save_dir: Path,
     import shutil, os, datetime as _dt
     zip_basename = f"{save_dir.name}_up_to_epoch_{epoch+1}"
     # Put the .zip in /content so the browser download is instant
-    zip_target   = os.path.join("/content", zip_basename)
+    zip_target   = os.path.join("/content/YOLOv5_Salient_Feature_Guided_Knowledge_Distillation/runs",zip_basename)
 
     # ── create archive ───────────────────────────────────────────────────────────
     shutil.make_archive(zip_target, "zip", root_dir=save_dir)
