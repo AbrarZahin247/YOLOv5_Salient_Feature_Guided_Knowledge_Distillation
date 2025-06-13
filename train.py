@@ -119,6 +119,57 @@ import pandas as pd
 # import numpy as np
 # from pathlib import Path
 
+try:
+    from google.colab import files   # only available inside Colab
+except ImportError:                  # allows the file to run anywhere else
+    files = None
+
+def download_every_n_epochs(save_dir: Path,
+                            epoch: int,
+                            interval: int = 10,
+                            rank: int = -1) -> None:
+    """
+    Zip `save_dir` and trigger a browser download every `interval` epochs
+    (Colab only, and only on the main process/Rank 0).
+
+    Args:
+        save_dir (Path):  run directory created by YOLOv5 (…/runs/train/exp*).
+        epoch (int):      current epoch index **starting from 0**.
+        interval (int):   how often to download (default = 10).
+        rank (int):       world rank (should be -1 or 0 for single-GPU).
+
+    Example:
+        >>> download_every_n_epochs(save_dir, epoch, 10, RANK)
+    """
+    # Do nothing if we are not on the primary process
+    if rank not in {-1, 0}:
+        return
+
+    # Trigger only when the epoch is a multiple of `interval`
+    if (epoch + 1) % interval:
+        return
+
+    if files is None:  # not running inside Google Colab
+        print(f"[download_every_n_epochs] Skipped – google.colab not available.")
+        return
+
+    import shutil, os, datetime as _dt
+    zip_basename = f"{save_dir.name}_up_to_epoch_{epoch+1}"
+    # Put the .zip in /content so the browser download is instant
+    zip_target   = os.path.join("/content", zip_basename)
+
+    # ── create archive ───────────────────────────────────────────────────────────
+    shutil.make_archive(zip_target, "zip", root_dir=save_dir)
+    print(f"[download_every_n_epochs] Zipped results → {zip_target}.zip")
+
+    # ── trigger download ─────────────────────────────────────────────────────────
+    try:
+        files.download(f"{zip_target}.zip")
+        print(f"[download_every_n_epochs] Download started for epoch {epoch+1}.")
+    except Exception as e:
+        print(f"[download_every_n_epochs] Download failed: {e}")
+# ────────────────────────────────────────────────────────────────────────────────
+
 
 def save_weight_distribution(epoch, model, file_dir, exclude_bias_bn=True):
     """
@@ -598,6 +649,7 @@ def train(hyp, opt, device, callbacks):
                     torch.save(ckpt, w / f"epoch{epoch}.pt")
                 del ckpt
                 callbacks.run("on_model_save", last, epoch, final_epoch, best_fitness, fi)
+            download_every_n_epochs(save_dir, epoch, interval=10, rank=RANK)
 
         # EarlyStopping
         if RANK != -1:  # if DDP training
