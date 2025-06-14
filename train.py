@@ -679,7 +679,7 @@ def train(hyp, opt, device, callbacks):
         
 
         # save_weight_distribution(epoch, model, file_dir=save_dir)
-        download_every_n_epochs(save_dir, epoch, interval=1, rank=RANK)
+        # download_every_n_epochs(save_dir, epoch, interval=1, rank=RANK)
         # save_grad_flow(model.named_parameters(), epoch, save_dir)
         # end epoch ----------------------------------------------------------------------------------------------------
 
