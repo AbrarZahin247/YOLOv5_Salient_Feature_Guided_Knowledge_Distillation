@@ -146,23 +146,38 @@ def download_every_n_epochs(save_dir: Path,
         return
 
     # Trigger only when the epoch is a multiple of `interval`
-    if (epoch + 1) % interval:
+    if (epoch + 1) % interval != 0:  # Fixed condition
         return
 
-    if files is None:  # not running inside Google Colab
-        print(f"[download_every_n_epochs] Skipped – google.colab not available.")
+    try:
+        from google.colab import files  # Moved import inside Colab check
+        in_colab = True
+    except ImportError:
+        in_colab = False
+
+    if not in_colab:
+        print(f"[download_every_n_epochs] Skipped – not running in Google Colab.")
         return
 
-    import shutil, os, datetime as _dt
+    import shutil, os
+    from pathlib import Path
+
+    # Create target directory if it doesn't exist
+    target_base = Path("/content/YOLOv5_Salient_Feature_Guided_Knowledge_Distillation/runs")
+    target_base.mkdir(parents=True, exist_ok=True)  # Added directory creation
+    
     zip_basename = f"{save_dir.name}_up_to_epoch_{epoch+1}"
-    # Put the .zip in /content so the browser download is instant
-    zip_target   = os.path.join("/content/YOLOv5_Salient_Feature_Guided_Knowledge_Distillation/runs",zip_basename)
+    zip_target = target_base / zip_basename  # Fixed path handling
 
-    # ── create archive ───────────────────────────────────────────────────────────
-    shutil.make_archive(zip_target, "zip", root_dir=save_dir)
-    print(f"[download_every_n_epochs] Zipped results → {zip_target}.zip")
+    # Create archive
+    try:
+        shutil.make_archive(str(zip_target), "zip", root_dir=save_dir.parent, base_dir=save_dir.name)  # Fixed root_dir
+        print(f"[download_every_n_epochs] Zipped results → {zip_target}.zip")
+    except Exception as e:
+        print(f"[download_every_n_epochs] Archiving failed: {e}")
+        return
 
-    # ── trigger download ─────────────────────────────────────────────────────────
+    # Trigger download
     try:
         files.download(f"{zip_target}.zip")
         print(f"[download_every_n_epochs] Download started for epoch {epoch+1}.")
