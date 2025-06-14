@@ -179,7 +179,9 @@ def download_every_n_epochs(save_dir: Path,
 
     # Trigger download
     try:
-        files.download(f"{zip_target}.zip")
+        download_path=f"{zip_target}.zip"
+        print(f"download path for zip: {download_path}")
+        files.download(download_path)
         print(f"[download_every_n_epochs] Download started for epoch {epoch+1}.")
     except Exception as e:
         print(f"[download_every_n_epochs] Download failed: {e}")
