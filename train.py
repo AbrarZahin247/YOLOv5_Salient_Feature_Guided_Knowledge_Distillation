@@ -1,18 +1,6 @@
 # YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
 """
 Train a YOLOv5 model on a custom dataset.
-Models and datasets download automatically from the latest YOLOv5 release.
-
-Usage - Single-GPU training:
-    $ python train.py --data coco128.yaml --weights yolov5s.pt --img 640  # from pretrained (recommended)
-    $ python train.py --data coco128.yaml --weights '' --cfg yolov5s.yaml --img 640  # from scratch
-
-Usage - Multi-GPU DDP training:
-    $ python -m torch.distributed.run --nproc_per_node 4 --master_port 1 train.py --data coco128.yaml --weights yolov5s.pt --img 640 --device 0,1,2,3
-
-Models:     https://github.com/ultralytics/yolov5/tree/master/models
-Datasets:   https://github.com/ultralytics/yolov5/tree/master/data
-Tutorial:   https://docs.ultralytics.com/yolov5/tutorials/train_custom_data
 """
 
 import argparse
@@ -60,13 +48,7 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
                            yaml_save)
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
-#from utils.loss import ComputeLoss
-from utils.loss_gated_filter import ComputeLoss
-#from utils.cbam import CBAM
-# from utils.computeloss import ComputeLoss as TeacherComputeLoss
-#from utils.get_teacher_loss import get_teacher_model_label_bbox
-
-
+from utils.loss_gated_filter import ComputeLoss # Using your custom loss
 from utils.metrics import fitness
 from utils.plots import plot_evolve
 from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, select_device, smart_DDP, smart_optimizer,
@@ -76,326 +58,6 @@ LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable
 RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
 GIT_INFO = check_git_info()
-
-def create_masks_from_batch(batch_images, n=1, divisor=16):
-    batch_size, _, image_size, _ = batch_images.size()
-    device = "cpu"
-    mask_size = image_size // divisor
-    
-    # Generate random positions for all masks in the batch in one line
-    mask_positions_x = torch.randint(0, image_size - mask_size, (batch_size, n))
-    mask_positions_y = torch.randint(0, image_size - mask_size, (batch_size, n))
-    
-    # Initialize a list to hold masks for each image
-    masks_list = []
-    
-    # Initialize masks tensor
-    masks = torch.zeros((batch_size, 3, image_size, image_size)).to(device)
-    
-    # Set random square regions to 1 in each mask for each image using advanced indexing
-    masks[torch.arange(batch_size).unsqueeze(1), :, mask_positions_x, mask_positions_y] = 1
-    inverted_mask=1-masks
-    return masks,inverted_mask
-
-def xywh_2_xyxy(xywh,image_width,image_height):
-    x, y, w, h = xywh
-    # Convert from normalized (x, y, w, h) to absolute coordinates
-    x_abs = x * image_width
-    y_abs = y * image_height
-    w_abs = w * image_width
-    h_abs = h * image_height
-
-    # Calculate bounding box coordinates
-    x1 = int(max(0, x_abs - w_abs / 2))
-    y1 = int(max(0, y_abs - h_abs / 2))
-    x2 = int(min(image_width - 1, x_abs + w_abs / 2))
-    y2 = int(min(image_height - 1, y_abs + h_abs / 2))    
-    return x1,y1,x2,y2
-
-
-# def create_bbox_mask(xywh, mask, image_width, image_height):
-#     x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
-#     # Check if both starting point coordinates are within mask boundaries
-#     if 0 <= x1 < image_width and 0 <= y1 < image_height:
-#         # Check if ending point coordinates are within mask boundaries
-#         x2 = min(image_width - 1, x2)
-#         y2 = min(image_height - 1, y2)
-#         # Create mask
-#         mask[y1:y2+1, x1:x2+1] = 1
-#     return mask
-
-## efficent optimized function
-
-def prepare_batch_mask_tensor(tensor_indices, tensor_bbox, batch, image_width, image_height, device):
-    prediction_mask = torch.zeros(batch, 3, image_width, image_height, device=device)
-    tensor_indices = tensor_indices.to(device)
-    tensor_bbox = tensor_bbox.to(device)
-
-    for i in range(tensor_indices.size(0)):
-        batch_index = tensor_indices[i]
-        xywh = tensor_bbox[i]
-        x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
-
-        if 0 < x1 < image_width and 0 < y1 < image_height:
-            x2 = min(image_width - 1, x2)
-            y2 = min(image_height - 1, y2)
-            prediction_mask[batch_index, :, y1:y2 + 1, x1:x2 + 1] = 1
-
-    return prediction_mask
-
-def compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.33):
-    gt_mask = gt_mask.to(torch.int32).to(device)
-    pred_mask = pred_mask.to(torch.int32).to(device)
-
-    num_ones_pred_mask = torch.sum(pred_mask == 1, dim=(1, 2))
-    num_ones_gt_mask = torch.sum(gt_mask == 1, dim=(1, 2))
-    # print(f"num_ones_pred_mask ==> {num_ones_pred_mask.size()}")
-    # print(f"num_ones_gt_mask ==> {num_ones_gt_mask.size()}")
-
-
-
-    pred_error_count = num_ones_pred_mask - num_ones_gt_mask
-    mask_sizes = gt_mask.size(1) * gt_mask.size(2) * 3
-    error_ratios = pred_error_count.float() / mask_sizes
-    average_error_ratios = torch.mean(error_ratios, dim=1)
-    
-    # print(f"average error ratios ==> {average_error_ratios}")
-    result_list = [1 if x > 0 else 0 for x in average_error_ratios]
-    # bool_correct_fc = (pred_error_count >= 0) & (error_ratios <= ratio_threshold)
-
-    return result_list
-
-# def compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.33):
-#     gt_mask = gt_mask.to(torch.int32).to(device)
-#     pred_mask = pred_mask.to(torch.int32).to(device)
-#     bool_correct_fc = []
-
-#     for i in range(gt_mask.size(0)):
-#         _, gt_height, gt_width = gt_mask[i].size()
-#         num_ones_pred_mask = torch.sum(pred_mask[i] == 1).item()
-#         num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
-
-#         if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
-#             pred_error_count = (num_ones_pred_mask - num_ones_gt_mask)
-#             error_ratio = pred_error_count / (gt_width * gt_height * 3)
-#             if pred_error_count >= 0 and error_ratio > ratio_threshold:
-#                 bool_correct_fc.append(0)
-#             else:
-#                 bool_correct_fc.append(1)
-
-#     return bool_correct_fc
-
-def prepare_gt_mask(ground_truths, batch_size, width, height, device):
-    with torch.no_grad():
-        ground_truth_mask = torch.zeros(batch_size, 3, width, height, device=device)
-        for gt in ground_truths:
-            image_index_batch = int(gt[0])
-            xywh = gt[-4:]
-            x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
-
-            if 0 < x1 < width and 0 < y1 < height:
-                x2 = min(width - 1, x2)
-                y2 = min(height - 1, y2)
-                ground_truth_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 1
-
-        # inverted_mask = 1 - ground_truth_mask
-
-    # return ground_truth_mask, inverted_mask
-    return ground_truth_mask
-
-
-# def prepare_batch_mask_tensor(tensor_indices, tensor_bbox, batch, image_width, image_height, device):
-#     prediction_mask = torch.zeros(batch, 3, image_width, image_height, device=device)
-#     tensor_indices = tensor_indices.to(device)
-#     tensor_bbox = tensor_bbox.to(device)
-
-#     for i in range(tensor_indices.size(0)):
-#         batch_index = tensor_indices[i]
-#         xywh = tensor_bbox[i]
-#         x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
-
-#         if 0 < x1 < image_width and 0 < y1 < image_height:
-#             x2 = min(image_width - 1, x2)
-#             y2 = min(image_height - 1, y2)
-#             prediction_mask[batch_index, :, y1:y2 + 1, x1:x2 + 1] = 1
-
-#     return prediction_mask
-
-# def prepare_gt_mask_and_inverted_mask(ground_truths, batch_size, width, height, device):
-#     with torch.no_grad():
-#         ground_truth_mask = torch.zeros(batch_size, 3, width, height, device=device)
-#         for gt in ground_truths:
-#             image_index_batch = int(gt[0])
-#             xywh = gt[-4:]
-#             x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
-
-#             if 0 < x1 < width and 0 < y1 < height:
-#                 x2 = min(width - 1, x2)
-#                 y2 = min(height - 1, y2)
-#                 ground_truth_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 1
-
-#         inverted_mask = 1 - ground_truth_mask
-
-#     return ground_truth_mask, inverted_mask
-
-# def compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3):
-#     gt_mask = gt_mask.to(torch.int32).to(device)
-#     pred_mask = pred_mask.to(torch.int32).to(device)
-#     bool_correct_fc = []
-
-#     for i in range(gt_mask.size(0)):
-#         _, gt_height, gt_width = gt_mask[i].size()
-#         num_ones_pred_mask = torch.sum(pred_mask[i] == 1).item()
-#         num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
-
-#         if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
-#             pred_error_count = (num_ones_pred_mask - num_ones_gt_mask)
-#             error_ratio = pred_error_count / (gt_width * gt_height * 3)
-#             if pred_error_count >= 0 and error_ratio > ratio_threshold:
-#                 bool_correct_fc.append(0)
-#             else:
-#                 bool_correct_fc.append(1)
-
-#     return bool_correct_fc
-
-# def masked_img_and_inv_masked_img(ground_truths, batch, width, height, device):
-#     with torch.no_grad():
-#         ground_truth_mask = torch.zeros(batch, 3, width, height, device=device)
-#         for gt in ground_truths:
-#             image_index_batch = int(gt[0])
-#             xywh = gt[-4:]
-#             x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
-
-#             if 0 < x1 < width and 0 < y1 < height:
-#                 x2 = min(width - 1, x2)
-#                 y2 = min(height - 1, y2)
-#                 ground_truth_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 1
-
-#         inverted_mask = 1 - ground_truth_mask
-
-#     return ground_truth_mask, inverted_mask
-
-
-
-
-# def masked_img_and_inv_masked_img(targets, batch, width, height, device):
-#     with torch.no_grad():
-#         master_mask = torch.zeros(batch, 3, width, height, device=device)
-#         inverted_mask = torch.ones(batch, 3, width, height, device=device)
-
-#         for target in targets:
-#             xywh = target[-4:]
-#             image_index_batch = int(target[0])
-#             x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
-            
-#             # Ensure coordinates are within image boundaries
-#             x1 = max(0, min(width - 1, x1))
-#             y1 = max(0, min(height - 1, y1))
-#             x2 = max(0, min(width - 1, x2))
-#             y2 = max(0, min(height - 1, y2))
-
-#             # Update master_mask
-#             master_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 1
-            
-#             # Update inverted_mask
-#             inverted_mask[image_index_batch, :, y1:y2 + 1, x1:x2 + 1] = 0
-
-#     return master_mask, inverted_mask
-
-# def get_teacher_model_label_bbox(dataset, names, hyp, nc, device, teacher_weight, given_images, targets):
-#     teacher_ckpt = torch.load(teacher_weight, map_location=device) 
-#     teacher_model = Model(teacher_ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device) 
-    
-#     teacher_model.nc = nc
-#     teacher_model.hyp = hyp
-#     teacher_model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc
-#     teacher_model.names = names
-    
-#     with torch.no_grad():
-#         pred = teacher_model(given_images)
-#         compute_teacher_loss = ComputeLoss(teacher_model)
-#         pboxes = compute_teacher_loss(pred, targets.to(device))
-    
-#     return pboxes
-
-
-# def process_targets(targets, tensor_indices, tensor_bbox, image_width, image_height, ratio_threshold=0.3):
-#     # Prepare mask tensor for ground truth
-#     master_mask = torch.zeros((image_height, image_width), dtype=torch.float32)
-#     for target in targets:
-#         xywh = target[-4:]
-#         image_index_batch = int(target[0])
-#         x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
-#         if 0 < x1 < image_width and 0 < y1 < image_height:
-#             x2 = min(image_width - 1, x2)
-#             y2 = min(image_height - 1, y2)
-#             master_mask[y1:y2+1, x1:x2+1] = 1.0
-    
-#     # Prepare mask tensor for predictions
-#     pred_mask = torch.zeros_like(master_mask, dtype=torch.int32)
-#     for i in range(tensor_indices.size(0)):
-#         xywh = tensor_bbox[i]
-#         x1, y1, x2, y2 = xywh_2_xyxy(xywh, image_width, image_height)
-#         if 0 < x1 < image_width and 0 < y1 < image_height:
-#             x2 = min(image_width - 1, x2)
-#             y2 = min(image_height - 1, y2)
-#             pred_mask[y1:y2+1, x1:x2+1] = 1
-    
-#     # Compare masks
-#     bool_correct_fc = []
-#     for i in range(tensor_indices.size(0)):
-#         gt_height, gt_width = master_mask.size()
-#         num_ones_pred_mask = torch.sum(pred_mask == 1).item()
-#         num_ones_gt_mask = torch.sum(master_mask == 1).item()
-        
-#         if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
-#             pred_error_count = num_ones_pred_mask - num_ones_gt_mask
-#             error_ratio = pred_error_count / (gt_width * gt_height * 3)
-            
-#             if pred_error_count >= 0 and error_ratio > ratio_threshold:
-#                 bool_correct_fc.append(0)
-#             else:
-#                 bool_correct_fc.append(1)
-                
-#     return bool_correct_fc
-
-
-
-
-# def prepare_and_compare_masks(targets, batch, width, height, device, ratio_threshold=0.3):
-#     master_mask = torch.zeros(batch, 3, width, height, device=device)
-#     _, inverted_mask = masked_img_and_inv_masked_img(targets, batch, width, height, device)
-#     bool_correct_fc = []
-    
-#     for target in targets:
-#         batch_index = int(target[0])
-#         xywh = target[-4:]
-#         x1, y1, x2, y2 = xywh_2_xyxy(xywh, width, height)
-
-#         if 0 < x1 < width and 0 < y1 < height:
-#             x2 = min(width - 1, x2)
-#             y2 = min(height - 1, y2)
-#             master_mask[batch_index, 0:3, y1:y2+1, x1:x2+1] = 1
-    
-#     gt_mask = inverted_mask.to(torch.int32)
-#     pred_mask = master_mask.to(torch.int32)
-    
-#     for i in range(gt_mask.size(0)):
-#         _, gt_height, gt_width = gt_mask[i].size()
-#         num_ones_pred_mask = torch.sum(pred_mask[i] == 1).item()
-#         num_ones_gt_mask = torch.sum(gt_mask[i] == 1).item()
-        
-#         if num_ones_gt_mask > 0 or num_ones_pred_mask > 0:
-#             pred_error_count = num_ones_pred_mask - num_ones_gt_mask
-#             error_ratio = pred_error_count / (gt_width * gt_height * 3)
-            
-#             if pred_error_count >= 0 and error_ratio > ratio_threshold:
-#                 bool_correct_fc.append(0)
-#             else:
-#                 bool_correct_fc.append(1)
-                
-#     return bool_correct_fc
-
 
 
 def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictionary
@@ -454,7 +116,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             weights = attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location='cpu')  # load checkpoint to CPU to avoid CUDA memory leak
         model = Model(cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
-        
         exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
         csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
         csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
@@ -464,20 +125,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
     amp = check_amp(model)  # check AMP
 
-    if opt.teacher_weight:
-        teacher_weight = opt.teacher_weight
-        with torch_distributed_zero_first(LOCAL_RANK):
-            teacher_weight = attempt_download(teacher_weight)  # download if not found locally
-        teacher_ckpt = torch.load(teacher_weight, map_location=device) 
-        teacher_model = Model(cfg or teacher_ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
-       
-        LOGGER.info(f'Load teacher model from {teacher_weight}')  # report
-
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
     for k, v in model.named_parameters():
         v.requires_grad = True  # train all layers
-        # v.register_hook(lambda x: torch.nan_to_num(x))  # NaN to 0 (commented for erratic training results)
         if any(x in k for x in freeze):
             LOGGER.info(f'freezing {k}')
             v.requires_grad = False
@@ -502,7 +153,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
     else:
         lf = lambda x: (1 - x / epochs) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)  # plot_lr_scheduler(optimizer, scheduler, epochs)
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
 
     # EMA
     ema = ModelEMA(model) if RANK in {-1, 0} else None
@@ -521,15 +172,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             'See Multi-GPU Tutorial at https://docs.ultralytics.com/yolov5/tutorials/multi_gpu_training to get started.'
         )
         model = torch.nn.DataParallel(model)
-        if opt.teacher_weight:
-            teacher_model = torch.nn.DataParallel(teacher_model)
 
     # SyncBatchNorm
     if opt.sync_bn and cuda and RANK != -1:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
-
-        if opt.teacher_weight:
-            teacher_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(teacher_model).to(device)
         LOGGER.info('Using SyncBatchNorm()')
 
     # Trainloader
@@ -578,8 +224,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     # DDP mode
     if cuda and RANK != -1:
         model = smart_DDP(model)
-        if opt.teacher_weight:
-            teacher_model = smart_DDP(teacher_model)
 
     # Model attributes
     nl = de_parallel(model).model[-1].nl  # number of detection layers (to scale hyps)
@@ -591,21 +235,11 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     model.hyp = hyp  # attach hyperparameters to model
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
     model.names = names
-    
-    if opt.teacher_weight:
-        teacher_model.nc = nc  # attach number of classes to model
-        teacher_model.hyp = hyp  # attach hyperparameters to model
-        teacher_model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
-        teacher_model.names = names
-    
-        for param in teacher_model.parameters():
-            param.requires_grad = False
 
     # Start training
     t0 = time.time()
     nb = len(train_loader)  # number of batches
     nw = max(round(hyp['warmup_epochs'] * nb), 100)  # number of warmup iterations, max(3 epochs, 100 iterations)
-    # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
     last_opt_step = -1
     maps = np.zeros(nc)  # mAP per class
     results = (0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
@@ -613,31 +247,15 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     scaler = torch.cuda.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
     compute_loss = ComputeLoss(model)  # init loss class
-    # teacher_compute_loss=TeacherComputeLoss(teacher_model)
     callbacks.run('on_train_start')
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
                 f"Logging results to {colorstr('bold', save_dir)}\n"
                 f'Starting training for {epochs} epochs...')
-                
-    
-    if opt.teacher_weight:
-        dump_image = torch.zeros((1, 3, opt.imgsz, opt.imgsz), device=device)
-        targets = torch.Tensor([[0, 0, 0, 0, 0, 0]]).to(device)
-        _, features= model(dump_image, target=targets)  # forward
-        _, teacher_feature = teacher_model(dump_image, target=targets) 
-        
-        _, student_channel, student_out_size, _ = features.shape
-        _, teacher_channel, teacher_out_size, _ = teacher_feature.shape
-        # stu_feature_adapt = nn.Sequential(nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
-        stu_feature_adapt = nn.Sequential(CBAM(student_channel,r=2),nn.Conv2d(student_channel, teacher_channel, 3, padding=1, stride=int(student_out_size / teacher_out_size)), nn.ReLU()).to(device)
-                  
-                
+
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         callbacks.run('on_train_epoch_start')
         model.train()
-        if opt.teacher_weight:
-            teacher_model.eval()
 
         # Update image weights (optional, single-GPU only)
         if opt.image_weights:
@@ -645,16 +263,11 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             iw = labels_to_image_weights(dataset.labels, nc=nc, class_weights=cw)  # image weights
             dataset.indices = random.choices(range(dataset.n), weights=iw, k=dataset.n)  # rand weighted idx
 
-        # Update mosaic border (optional)
-        # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
-        # dataset.mosaic_border = [b - imgsz, -b]  # height, width borders
-
-        # mloss = torch.zeros(3, device=device)  # mean losses
-        mloss = torch.zeros(4, device=device)
+        mloss = torch.zeros(4, device=device)  # <-- FIX #1: Changed from 3 to 4 to include gate_loss
         if RANK != -1:
             train_loader.sampler.set_epoch(epoch)
         pbar = enumerate(train_loader)
-        LOGGER.info(('\n' + '%11s' * 7) % ('Epoch', 'GPU_mem', 'box_loss', 'obj_loss', 'cls_loss', 'Instances', 'Size'))
+        LOGGER.info(('\n' + '%11s' * 8) % ('Epoch', 'GPU_mem', 'box_loss', 'obj_loss', 'cls_loss', 'gate_loss', 'Instances', 'Size')) # <-- FIX #2a: Added gate_loss to header
         if RANK in {-1, 0}:
             pbar = tqdm(pbar, total=nb, bar_format=TQDM_BAR_FORMAT)  # progress bar
         optimizer.zero_grad()
@@ -666,7 +279,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             # Warmup
             if ni <= nw:
                 xi = [0, nw]  # x interp
-                # compute_loss.gr = np.interp(ni, xi, [0.0, 1.0])  # iou loss ratio (obj_loss = 1.0 or iou)
                 accumulate = max(1, np.interp(ni, xi, [1, nbs / batch_size]).round())
                 for j, x in enumerate(optimizer.param_groups):
                     # bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
@@ -683,54 +295,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     imgs = nn.functional.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
 
             # Forward
-
-            with torch.cuda.amp.autocast(amp):
-                targets = targets.to(device)
-                if opt.teacher_weight:
-                    batch_size, _, img_w, img_h = imgs.size()
-                    
-                    
-                    # batch_masked_image=imgs*batch_mask
-                    # batch_inverted_masked_image=imgs*inverted_mask
-                    # print(f"returned unique ===> {batch_mask.unique(return_counts=True)}")
-                    std_pred,std_features = model(imgs,target=targets)
-                    
-                    # std_pred_masked, std_features_masked= model(batch_masked_image, target=targets)  # forward
-                    # std_pred_masked_inv, std_features_masked_inv= model(batch_inverted_masked_image, target=targets)  # forward
-                    # bbox=compute_loss.get_gt_bbox(pred,targets)
-                    
-                    tech_pred,tech_features = teacher_model(imgs,target=targets)
-                    
-                    # tech_pred_masked, tech_features_masked= teacher_model(batch_masked_image, target=targets)  # forward
-                    # tech_pred_masked_inv, tech_features_masked_inv= teacher_model(batch_inverted_masked_image, target=targets)  # forward
-
-                    ## dataset,names,hyp,nc,device,weights,imgs,targets
-                    # mask_calc_device="cpu"
-                    
-                    tensor_batch_index,tensor_bbox=get_teacher_model_label_bbox(dataset,names,hyp,nc,device,opt.teacher_weight,imgs,targets)
-                    pred_mask=prepare_batch_mask_tensor(tensor_batch_index, tensor_bbox, batch_size, img_w, img_h, device)
-                    
-                    gt_mask=prepare_gt_mask(targets,batch_size,img_w,img_h,device)
-                    
-                    teacher_focused_feature_index=compare_two_mask(gt_mask, pred_mask, device, ratio_threshold=0.3)
-                    # print(f"focused_feature_index ==> {teacher_focused_feature_index}")
-                    
-                    
-                    
-                    
-                    # teacher_focused_feature_index=prepare_batch_mask_tensor(tensor_batch_index,tensor_bbox,batch_size,img_w, img_h,mask_calc_device)
-                    
-                    ## here all ways give full image for mask generation
-                    # batch_mask,inverted_mask=masked_img_and_inv_masked_img(targets,batch_size,img_w,img_h,mask_calc_device)
-                    # teacher_focused_feature_index=compare_two_mask(batch_mask,prediction_mask,mask_calc_device)
-                    # print(f"teacher_focused_feature_index ===> {teacher_focused_feature_index}")
-                    # print(f"teacher indices ===> {tech_indices}")
-
-                    loss, loss_items = compute_loss(std_pred,targets,stu_feature_adapt(std_features), tech_features.detach(),teacher_focused_feature_index)  # loss scaled by batch_size
-                    
-                else:
-                    pred = model(imgs)  # forward
-                    loss, loss_items = compute_loss(pred, targets)  # loss scaled by batch_size
+            with torch.amp.autocast(device_type='cuda', enabled=amp): # <-- FIX #3: Updated deprecated autocast call
+                pred = model(imgs)  # forward
+                loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
 
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
@@ -740,7 +307,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             # Backward
             scaler.scale(loss).backward()
 
-            # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
+            # Optimize
             if ni - last_opt_step >= accumulate:
                 scaler.unscale_(optimizer)  # unscale gradients
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
@@ -755,10 +322,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             if RANK in {-1, 0}:
                 mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
                 mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G'  # (GB)
-                pbar.set_description(('%11s' * 2 + '%11.4g' * 5) %
-                                     (f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1]))
-                pbar.set_description(('%11s' * 2 + '%11.4g' * 6) %
-                     (f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgsz))
+                pbar.set_description(('%11s' * 2 + '%11.4g' * 6) % # <-- FIX #2b: Changed from 5 to 6 to display all losses
+                                     (f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgsz))
                 callbacks.run('on_train_batch_end', model, ni, imgs, targets, paths, list(mloss))
                 if callbacks.stop_training:
                     return
@@ -807,13 +372,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     'git': GIT_INFO,  # {remote, branch, commit} if a git repo
                     'date': datetime.now().isoformat()}
 
-
                 # Save last, best and delete
-                
                 torch.save(ckpt, last)
                 if best_fitness == fi:
                     torch.save(ckpt, best)
-
                 del ckpt
                 callbacks.run('on_model_save', last, epoch, final_epoch, best_fitness, fi)
 
@@ -861,7 +423,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
-    parser.add_argument('--teacher_weight', type=str, default= '', help='initial weights path')
+    # parser.add_argument('--teacher_weight', type=str, default= '', help='initial weights path') #<-- REMOVED
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
