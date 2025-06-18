@@ -64,7 +64,7 @@ from utils.loggers.comet.comet_utils import check_comet_resume
 from utils.loss_gated_filter import ComputeLoss
 #from utils.cbam import CBAM
 # from utils.computeloss import ComputeLoss as TeacherComputeLoss
-from utils.get_teacher_loss import get_teacher_model_label_bbox
+#from utils.get_teacher_loss import get_teacher_model_label_bbox
 
 
 from utils.metrics import fitness
