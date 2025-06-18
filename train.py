@@ -60,7 +60,8 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
                            yaml_save)
 from utils.loggers import Loggers
 from utils.loggers.comet.comet_utils import check_comet_resume
-from utils.loss import ComputeLoss
+#from utils.loss import ComputeLoss
+from utils.loss_gated_filter import ComputeLoss
 from utils.cbam import CBAM
 # from utils.computeloss import ComputeLoss as TeacherComputeLoss
 from utils.get_teacher_loss import get_teacher_model_label_bbox
