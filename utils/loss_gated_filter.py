@@ -181,94 +181,95 @@ class ComputeLoss:
         self.device = device
 
     def __call__(self, p, targets):  # predictions, targets
-        """Performs forward pass, calculating class, box, and object loss for given predictions and targets."""
-        lcls = torch.zeros(1, device=self.device)  # class loss
-        lbox = torch.zeros(1, device=self.device)  # box loss
-        lobj = torch.zeros(1, device=self.device)  # object loss
+        device = self.device
+        # Initialize losses as 1-D tensors
+        lcls = torch.zeros(1, device=device)
+        lbox = torch.zeros(1, device=device)
+        lobj = torch.zeros(1, device=device)
+        l_gate = torch.zeros(1, device=device) # Initialize l_gate as well
+        
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
-
-        # --- PROPOSED MODIFICATION ---
-        # Store objectness scores and individual layer losses for the gating mechanism
+    
         layer_obj_scores = []
         layer_lbox = []
-        # --- END PROPOSED MODIFICATION ---
-
-
-        # Losses
+    
+        # Calculate losses for each layer
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-            tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
-
+            tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=device)
+    
+            layer_obj_scores.append(torch.sigmoid(pi[..., 4]).mean())
+    
             n = b.shape[0]  # number of targets
             if n:
-                # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
-                pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
-
+                pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)
+    
                 # Regression
                 pxy = pxy.sigmoid() * 2 - 0.5
                 pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
-                pbox = torch.cat((pxy, pwh), 1)  # predicted box
-                iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
-                lbox_i = (1.0 - iou).mean()  # iou loss for this layer
-                lbox += lbox_i # Accumulate for now, will be re-weighted later
-                layer_lbox.append(lbox_i.detach()) # Store for gating loss
-
+                pbox = torch.cat((pxy, pwh), 1)
+                iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()
+                
+                # This results in a scalar, which is fine for now
+                lbox_i = (1.0 - iou).mean()
+                layer_lbox.append(lbox_i.detach())
+    
                 # Objectness
                 iou = iou.detach().clamp(0).type(tobj.dtype)
-                if self.sort_obj_iou:
-                    j = iou.argsort()
-                    b, a, gj, gi, iou = b[j], a[j], gj[j], gi[j], iou[j]
                 if self.gr < 1:
                     iou = (1.0 - self.gr) + self.gr * iou
-                tobj[b, a, gj, gi] = iou  # iou ratio
-
+                tobj[b, a, gj, gi] = iou
+    
                 # Classification
-                if self.nc > 1:  # cls loss (only if multiple classes)
-                    t = torch.full_like(pcls, self.cn, device=self.device)  # targets
+                if self.nc > 1:
+                    t = torch.full_like(pcls, self.cn, device=device)
                     t[range(n), tcls[i]] = self.cp
-                    lcls += self.BCEcls(pcls, t)  # BCE
-
+                    # Note: The original lcls is a scalar sum, which we will handle later
+                    lcls += self.BCEcls(pcls, t)
+    
             obji = self.BCEobj(pi[..., 4], tobj)
-            lobj += obji * self.balance[i]  # obj loss
+            # Note: The original lobj is a scalar sum
+            lobj += obji * self.balance[i]
             if self.autobalance:
                 self.balance[i] = self.balance[i] * 0.9999 + 0.0001 / obji.detach().item()
-
-            # --- PROPOSED MODIFICATION ---
-            # Store the average objectness score for the current layer
-            layer_obj_scores.append(torch.sigmoid(pi[..., 4]).mean())
-            # --- END PROPOSED MODIFICATION ---
-
-        # --- PROPOSED MODIFICATION ---
-        # Gating mechanism
-        # Convert list of scores to a tensor
-        layer_obj_scores_tensor = torch.stack(layer_obj_scores)
-        # Get the gating probabilities from the gating layer
-        gating_probs = self.gating_layer(layer_obj_scores_tensor)
-
-        # Re-weight the losses based on the gating probabilities
-        lbox = sum(prob * l for prob, l in zip(gating_probs, layer_lbox))
-        # Note: A similar re-weighting could be applied to lobj and lcls if desired,
-        # but for this example, we focus on the box loss as a direct measure of localization quality.
-
-        # Gating loss - penalizes the gating layer for assigning low probabilities
-        # to layers with low box loss (i.e., high-quality detections)
-        # The idea is to encourage higher probabilities for layers that produce good boxes.
-        # We use the detached box loss to avoid influencing the box regression gradients directly from this loss.
-        l_gate = sum(prob * l for prob, l in zip(gating_probs, layer_lbox))
-        lambda_gate = self.hyp.get("gate_lambda", 1.0) # Hyperparameter for the gating loss weight
-        # --- END PROPOSED MODIFICATION ---
-
+    
+        # --- Gating Logic and Final Loss Calculation ---
+        if layer_lbox:
+            layer_obj_scores_tensor = torch.stack(layer_obj_scores)
+            gating_probs = self.gating_layer(layer_obj_scores_tensor)
+    
+            l_gate = sum(prob * l for prob, l in zip(gating_probs, layer_lbox))
+            lbox = sum(prob * l for prob, l in zip(gating_probs, layer_lbox)) # Use weighted sum for lbox
+        # If layer_lbox is empty (no targets), lbox and l_gate will remain zero as initialized
+    
+        # --- FINALIZATION AND ROBUSTNESS FIX ---
+        # At this point, lbox, lobj, lcls, and l_gate might be zero-dim scalars.
+        # We must ensure all are 1-D tensors before concatenating.
+        
+        # Use .unsqueeze(0) if a tensor is a scalar (has 0 dimensions)
+        if lbox.ndim == 0:
+            lbox = lbox.unsqueeze(0)
+        if lobj.ndim == 0:
+            lobj = lobj.unsqueeze(0)
+        if lcls.ndim == 0:
+            lcls = lcls.unsqueeze(0)
+        if l_gate.ndim == 0:
+            l_gate = l_gate.unsqueeze(0)
+            
+        # --- Final Loss Calculation ---
         if self.autobalance:
             self.balance = [x / self.balance[self.ssi] for x in self.balance]
+            
         lbox *= self.hyp["box"]
         lobj *= self.hyp["obj"]
         lcls *= self.hyp["cls"]
-        bs = tobj.shape[0]  # batch size
-
-        # --- PROPOSED MODIFICATION ---
-        # Add the gating loss to the total loss
-        total_loss = (lbox + lobj + lcls) * bs + lambda_gate * l_gate
-        return total_loss, torch.cat((lbox, lobj, lcls, l_gate)).detach()
+        bs = p[0].shape[0]
+    
+        lambda_gate = self.hyp.get("gate_lambda", 1.0)
+        total_loss = lbox.sum() + lobj.sum() + lcls.sum() + lambda_gate * l_gate.sum()
+    
+        # Now all tensors are guaranteed to be 1-D, so concatenation will work
+        return total_loss * bs, torch.cat((lbox, lobj, lcls, l_gate)).detach()
         # --- END PROPOSED MODIFICATION ---
 
 
