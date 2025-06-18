@@ -134,13 +134,11 @@ class GatingLayer(nn.Module):
     def forward(self, obj_scores):
         """
         Forward pass of the GatingLayer.
-        Args:
-            obj_scores (torch.Tensor): A tensor containing the average objectness score for each detection layer.
-                                        Shape: (nl,)
-        Returns:
-            torch.Tensor: A tensor of gating probabilities, one for each detection layer. Shape: (nl,)
+        ...
         """
-        return self.gating_network(obj_scores)
+        # THE FIX: Cast the input tensor to float32 to match the layer's weights.
+        # .float() is a convenient shorthand for .to(torch.float32).
+        return self.gating_network(obj_scores.float())
 
 class ComputeLoss:
     """Computes the total loss for YOLOv5 model predictions, including classification, box, objectness losses, and a
