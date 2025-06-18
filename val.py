@@ -129,7 +129,9 @@ def run(
     # Initialize/load model and set device
     training = model is not None
     if training:  # called by train.py
-        device, pt, jit, engine = model.device, True, False, False  # get model device, PyTorch model
+        device = next(model.parameters()).device  # get model device
+        pt, jit, engine = True, False, False # set model types
+        # device, pt, jit, engine = model.device, True, False, False  # get model device, PyTorch model
         half &= device.type != 'cpu'  # half precision only supported on CUDA
         model.half() if half else model.float()
     else:  # called directly
