@@ -47,7 +47,7 @@ except (ImportError, AssertionError):
 
 from ultralytics.utils.checks import check_requirements
 
-# from utils import TryExcept, emojis
+from utils import TryExcept, emojis
 from utils.downloads import curl_download, gsutil_getsize
 from utils.metrics import box_iou, fitness
 
