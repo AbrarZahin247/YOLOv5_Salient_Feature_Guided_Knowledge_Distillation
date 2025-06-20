@@ -129,21 +129,18 @@ def run(
     # Initialize/load model and set device
     training = model is not None
     if training:  # called by train.py
-        device = next(model.parameters()).device  # get model device
-        pt, jit, engine = True, False, False # set model types
-        # device, pt, jit, engine = model.device, True, False, False  # get model device, PyTorch model
-        half &= device.type != 'cpu'  # half precision only supported on CUDA
+        device = next(model.parameters()).device
+        pt, jit, engine = True, False, False
+        half &= device.type != 'cpu'
         model.half() if half else model.float()
     else:  # called directly
         device = select_device(device, batch_size=batch_size)
-        save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
-        (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
-        model = attempt_load(weights, device=device, inplace=True, fuse=True)
-        gs = max(int(model.stride.max()), 32)  # grid size (max stride)
-        imgsz = check_img_size(imgsz, s=gs)  # check image size
-        if dnn:
-            model = YOLOv5DNN(model)
-        data = check_dataset(data)  # check
+        save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)
+        (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)
+        model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
+        gs = max(int(model.stride.max()), 32)
+        imgsz = check_img_size(imgsz, s=gs)
+        data = check_dataset(data)
 
     # Half
     half &= device.type != 'cpu'
@@ -168,6 +165,7 @@ def run(
                                        single_cls,
                                        pad=pad,
                                        rect=rect,
+                                       rank=-1,
                                        workers=workers,
                                        prefix=colorstr(f'{task}: '))[0]
 
@@ -180,8 +178,7 @@ def run(
     s = ('%22s' + '%11s' * 6) % ('Class', 'Images', 'Instances', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
     dt, stats, ap, ap_class, jdict = (Profile(), Profile(), Profile()), [], [], [], []
     
-    # ***** THE ONLY CHANGE YOU NEED IS HERE *****
-    loss = torch.zeros(4, device=device)  # <-- FIX: Changed from 3 to 4
+    loss = torch.zeros(4, device=device)
     
     pbar = tqdm(dataloader, desc=s, bar_format=TQDM_BAR_FORMAT)
     for batch_i, (im, targets, paths, shapes) in enumerate(pbar):
@@ -194,21 +191,17 @@ def run(
                 im /= 255
                 nb, _, height, width = im.shape
 
-        # Inference
         with dt[1]:
             out, train_out = model(im) if training else model(im, augment=augment, val=True)
 
-        # Loss
         if compute_loss:
             loss += compute_loss(train_out, targets)[1]
 
-        # NMS
         with dt[2]:
             targets[:, 2:] *= torch.tensor((width, height, width, height), device=device)
             lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []
             out = non_max_suppression(out, conf_thres, iou_thres, labels=lb, multi_label=True, agnostic=single_cls, max_det=max_det)
 
-        # Metrics
         for si, pred in enumerate(out):
             labels = targets[targets[:, 0] == si, 1:]
             nl, npr = labels.shape[0], pred.shape[0]
@@ -242,18 +235,24 @@ def run(
                 save_one_txt(predn, save_conf, shape, file=save_dir / 'labels' / f'{path.stem}.txt')
             if save_json:
                 save_one_json(predn, jdict, path, class_map)
-            callbacks.run('on_val_batch_end', pred, si, path, shapes)
+            callbacks.run('on_val_batch_end', pred, si, path, names, im[si], out)
 
         if plots and batch_i < 3:
             plot_images(im, targets, paths, save_dir / f'val_batch{batch_i}_labels.jpg', names)
             plot_images(im, output_to_target(out), paths, save_dir / f'val_batch{batch_i}_pred.jpg', names)
 
     stats = [torch.cat(x, 0).numpy() for x in zip(*stats)]
+    
+    mp, mr, map50, map = 0.0, 0.0, 0.0, 0.0
+    maps = np.zeros(nc)
+    
     if len(stats) and stats[0].any():
         tp, fp, p, r, f1, ap, ap_class = ap_per_class(*stats, plot=plots, save_dir=save_dir, names=names)
         ap50, ap = ap[:, 0], ap.mean(1)
         mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
-    nt = np.bincount(stats[3].astype(int), minlength=nc)
+        maps = ap_class
+        
+    nt = np.bincount(stats[3].astype(int), minlength=nc) if len(stats) else np.zeros(nc)
 
     pf = '%22s' + '%11i' * 2 + '%11.3g' * 4
     LOGGER.info(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
@@ -301,7 +300,9 @@ def run(
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
     
-    return (mp, mr, map50, map, loss.cpu().numpy()), maps, t
+    # ***** THE FINAL FIX IS HERE *****
+    # Unpack the loss numpy array into the results tuple with the * operator
+    return (mp, mr, map50, map, *loss.cpu().numpy()), maps, t
 
 
 def parse_opt():
